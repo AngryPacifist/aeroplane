@@ -1,0 +1,24 @@
+services:
+  buildkit:
+    image: moby/buildkit:latest
+    container_name: deploy-buildkit
+    privileged: true
+    command: ["--addr", "tcp://0.0.0.0:1234"]
+    ports:
+      - "127.0.0.1:1234:1234"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    container_name: deploy-caddy
+    network_mode: host
+    command: ["sh", "-c", "mkdir -p /srv/deploy-data && touch /srv/deploy-data/Caddyfile && caddy run --config /srv/deploy-data/Caddyfile --adapter caddyfile --watch"]
+    volumes:
+      - ./data:/srv/deploy-data
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
