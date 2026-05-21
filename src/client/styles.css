@@ -1,8 +1,9 @@
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Unbounded:wght@500;700;800&display=swap");
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-hero: "Unbounded", ui-sans-serif, system-ui, sans-serif;
 }
 
 html,
@@ -14,6 +15,8 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
+  background: #0d0f14;
+  color: #f4f4f5;
 }
 
 button,
@@ -23,4 +26,9 @@ input {
 
 * {
   box-sizing: border-box;
+}
+
+.hero-noise {
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cfilter id='a'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23a)'/%3E%3C/svg%3E");
 }
