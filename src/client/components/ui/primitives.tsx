@@ -1,0 +1,105 @@
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Globe02Icon } from "@hugeicons/core-free-icons";
+import type { ReactNode } from "react";
+
+export function AppIcon({ icon, className = "", size = 18 }: { icon: unknown; className?: string; size?: number }) {
+  return <HugeiconsIcon icon={icon as never} size={size} strokeWidth={1.7} className={className} />;
+}
+
+export function surfaceClass(extra = "") {
+  return `border border-zinc-700/90 bg-zinc-900/98 shadow-[0_24px_80px_rgba(0,0,0,0.35)] ${extra}`.trim();
+}
+
+export function shellButton(variant: "primary" | "secondary" | "ghost" | "danger" = "secondary") {
+  if (variant === "primary") {
+    return "inline-flex items-center justify-center gap-2 border border-[#4FB8B2]/45 bg-[#4FB8B2]/15 px-3.5 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7fe3dd] transition hover:bg-[#4FB8B2]/25 disabled:opacity-60";
+  }
+  if (variant === "danger") {
+    return "inline-flex items-center justify-center gap-2 border border-rose-500/35 bg-rose-500/10 px-3.5 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-60";
+  }
+  if (variant === "ghost") {
+    return "inline-flex items-center justify-center gap-2 px-3 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:opacity-60";
+  }
+  return "inline-flex items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3.5 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:opacity-60";
+}
+
+export function chipClass(active: boolean) {
+  return active
+    ? "inline-flex items-center gap-2 border border-[#4FB8B2]/40 bg-[#4FB8B2]/14 px-3 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7fe3dd]"
+    : "inline-flex items-center gap-2 border border-zinc-700 bg-zinc-900/90 px-3 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-300 transition hover:border-zinc-500 hover:text-white";
+}
+
+export function statusClass(status: string) {
+  if (status === "active" || status === "running") return "border border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (status === "failed") return "border border-rose-500/30 bg-rose-500/10 text-rose-300";
+  if (status === "aborted") return "border border-zinc-600 bg-zinc-800/80 text-zinc-200";
+  if (status === "degraded") return "border border-orange-500/30 bg-orange-500/10 text-orange-300";
+  if (status === "building" || status === "queued") return "border border-amber-500/30 bg-amber-500/10 text-amber-300";
+  return "border border-zinc-700 bg-zinc-800/80 text-zinc-300";
+}
+
+export function StatusPill({ status }: { status: string }) {
+  return <span className={`px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] ${statusClass(status)}`}>{status}</span>;
+}
+
+export function deploymentCardClass(status: string, selected: boolean) {
+  if (selected) {
+    if (status === "failed") return "border-rose-500/40 bg-rose-950/35 text-rose-100";
+    if (status === "aborted") return "border-zinc-600 bg-zinc-800/90 text-zinc-100";
+    if (status === "building" || status === "queued") return "border-amber-500/40 bg-amber-950/25 text-amber-100";
+    if (status === "active" || status === "running") return "border-emerald-500/35 bg-emerald-950/25 text-emerald-100";
+    if (status === "superseded") return "border-zinc-700 bg-zinc-900 text-zinc-100";
+    return "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-zinc-50";
+  }
+
+  return "border-zinc-700 bg-zinc-900/90 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800/95";
+}
+
+export function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className="mb-2 block font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-400">{children}</span>;
+}
+
+export function FormInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`h-11 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-[#4FB8B2]/60 ${props.className ?? ""}`}
+    />
+  );
+}
+
+export function FormSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <select
+      {...props}
+      className={`h-11 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#4FB8B2]/60 ${props.className ?? ""}`}
+    />
+  );
+}
+
+export function SectionTitle({ icon, title, meta }: { icon: unknown; title: string; meta?: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="grid h-11 w-11 place-items-center border border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#7fe3dd]">
+        <AppIcon icon={icon} size={18} />
+      </div>
+      <div>
+        <h2 className="font-hero text-lg tracking-tight text-zinc-100">{title}</h2>
+        {meta ? <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">{meta}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+export function BrowserIconFallback({ className = "", size = 17 }: { className?: string; size?: number }) {
+  return <AppIcon icon={Globe02Icon} size={size} className={className} />;
+}
+
+export function InfoRow({ icon, label }: { icon: unknown | ((props: { className?: string; size?: number }) => ReactNode); label: string }) {
+  return (
+    <div className="flex items-center gap-3 border border-zinc-700 bg-zinc-900/85 px-3 py-3 text-sm text-zinc-200">
+      {typeof icon === "function" ? icon({ size: 17 }) : <AppIcon icon={icon} size={17} />}
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
