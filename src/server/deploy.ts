@@ -1,13 +1,15 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { ChildProcess, spawn } from "node:child_process";
+import net from "node:net";
 import { config } from "./config.js";
 import { db, nowIso, sqlite } from "./db.js";
 import { publishDeploymentLog } from "./logBus.js";
 import { deploymentLogs, deployments, envVars, services, type Deployment, type Service } from "./schema.js";
 import { writeAndReloadCaddy } from "./caddy.js";
+import { getCloneTokenForRepo } from "./github-connect.js";
 
 type RunOptions = {
   cwd?: string;
@@ -22,6 +24,14 @@ type EnqueueOptions = {
 
 let workerActive = false;
 let workerStarted = false;
+const activeCommands = new Map<string, ChildProcess>();
+const abortRequests = new Set<string>();
+
+class DeploymentAbortedError extends Error {
+  constructor() {
+    super("Deployment aborted");
+  }
+}
 
 function now() {
   return nowIso();
@@ -29,6 +39,18 @@ function now() {
 
 function safeSlug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "app";
+}
+
+function safeDockerIdentifier(value: string, fallback: string) {
+  return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "") || fallback;
+}
+
+export function containerNameForService(serviceId: string) {
+  return `deploy-${safeDockerIdentifier(serviceId, "service")}`;
+}
+
+export function staticSiteDirForService(serviceId: string) {
+  return resolve(config.dataDir, "static-sites", serviceId);
 }
 
 function redactLine(line: string, secrets: string[]) {
@@ -69,6 +91,7 @@ function runCommand(command: string, args: string[], deploymentId: string, optio
       env: { ...process.env, ...options.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
+    activeCommands.set(deploymentId, child);
 
     const handleChunk = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
       const lines = chunk.toString().split(/\r?\n/);
@@ -81,8 +104,20 @@ function runCommand(command: string, args: string[], deploymentId: string, optio
 
     child.stdout.on("data", handleChunk("stdout"));
     child.stderr.on("data", handleChunk("stderr"));
-    child.on("error", reject);
+    child.on("error", (error) => {
+      activeCommands.delete(deploymentId);
+      if (abortRequests.has(deploymentId)) {
+        reject(new DeploymentAbortedError());
+        return;
+      }
+      reject(error);
+    });
     child.on("close", (code) => {
+      activeCommands.delete(deploymentId);
+      if (abortRequests.has(deploymentId)) {
+        reject(new DeploymentAbortedError());
+        return;
+      }
       if (code === 0) {
         resolvePromise();
       } else {
@@ -103,9 +138,183 @@ function cloneUrlWithToken(repoUrl: string, token?: string | null) {
   return url.toString();
 }
 
+function parseTcpTarget(address: string) {
+  const match = address.match(/^tcp:\/\/([^:/]+):(\d+)$/i);
+  if (!match) return null;
+  return { host: match[1], port: Number(match[2]) };
+}
+
+function isBuildkitReachable(address: string, timeoutMs = 600) {
+  const target = parseTcpTarget(address);
+  if (!target) {
+    return Promise.resolve(false);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
+    socket.connect(target.port, target.host);
+  });
+}
+
+function buildkitStartHint() {
+  return "docker run --rm --privileged -d --name deploy-buildkit -p 127.0.0.1:1234:1234 moby/buildkit:latest --addr tcp://0.0.0.0:1234";
+}
+
+async function ensureBuildkitAvailable(deploymentId: string) {
+  const reachable = await isBuildkitReachable(config.buildkitHost);
+  if (reachable) return;
+
+  appendDeploymentLog(deploymentId, `BuildKit is unavailable at ${config.buildkitHost}.`, "stderr");
+  appendDeploymentLog(deploymentId, `Start it with: ${buildkitStartHint()}`, "stderr");
+  throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
+}
+
+function escapeDockerEnvValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function normalizeEnvValue(value: string) {
+  const trimmed = value.trim();
+  if (
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function createCustomDockerfile({
+  installCommand,
+  buildCommand,
+  startCommand,
+  internalPort,
+  looksLikeBunProject,
+  buildEnvKeys
+}: {
+  installCommand: string;
+  buildCommand: string;
+  startCommand: string;
+  internalPort: number;
+  looksLikeBunProject: boolean;
+  buildEnvKeys: string[];
+}) {
+  const baseImage = looksLikeBunProject ? "oven/bun:1" : "node:22";
+  const lines = [
+    `FROM ${baseImage} AS build`,
+    "WORKDIR /app",
+    "COPY . /app"
+  ];
+
+  for (const key of buildEnvKeys) {
+    lines.push(`ARG ${key}`);
+    lines.push(`ENV ${key}=$${key}`);
+  }
+
+  if (installCommand) lines.push(`RUN ${installCommand}`);
+  if (buildCommand) lines.push(`RUN ${buildCommand}`);
+
+  lines.push(`FROM ${baseImage}`);
+  lines.push("WORKDIR /app");
+  lines.push(`ENV PORT=\"${escapeDockerEnvValue(String(internalPort))}\"`);
+  lines.push("COPY --from=build /app /app");
+  lines.push(`CMD ${JSON.stringify(["sh", "-lc", startCommand])}`);
+
+  return `${lines.join("\n")}\n`;
+}
+
 function getEnvForService(serviceId: string) {
   const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
-  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  return Object.fromEntries(rows.map((row) => [row.key, normalizeEnvValue(row.value)]));
+}
+
+function getLastLiveServiceStatus(serviceId: string): "active" | "idle" {
+  const latestRunning = db
+    .select({ id: deployments.id })
+    .from(deployments)
+    .where(and(eq(deployments.serviceId, serviceId), eq(deployments.status, "running")))
+    .orderBy(desc(deployments.createdAt))
+    .limit(1)
+    .get();
+
+  return latestRunning ? "active" : "idle";
+}
+
+export function abortDeployment(deploymentId: string) {
+  const deployment = db.select().from(deployments).where(eq(deployments.id, deploymentId)).get();
+  if (!deployment) {
+    throw new Error("Deployment not found");
+  }
+
+  if (deployment.status === "queued") {
+    db.update(deployments).set({ status: "aborted", finishedAt: now() }).where(eq(deployments.id, deploymentId)).run();
+    db.update(services)
+      .set({ status: getLastLiveServiceStatus(deployment.serviceId), updatedAt: now() })
+      .where(eq(services.id, deployment.serviceId))
+      .run();
+    appendDeploymentLog(deploymentId, "Deployment aborted before start.", "stderr");
+    return { accepted: true };
+  }
+
+  if (deployment.status !== "building") {
+    throw new Error("Only queued or building deployments can be aborted");
+  }
+
+  abortRequests.add(deploymentId);
+  db.update(deployments).set({ status: "aborted", finishedAt: now() }).where(eq(deployments.id, deploymentId)).run();
+  appendDeploymentLog(deploymentId, "Abort requested. Stopping build…", "stderr");
+
+  const child = activeCommands.get(deploymentId);
+  if (child && !child.killed) {
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      const stillRunning = activeCommands.get(deploymentId);
+      if (stillRunning && !stillRunning.killed) {
+        stillRunning.kill("SIGKILL");
+      }
+    }, 3000);
+  }
+
+  return { accepted: true };
+}
+
+function supersedeRunningDeployments(serviceId: string) {
+  db.update(deployments)
+    .set({ status: "superseded" })
+    .where(and(eq(deployments.serviceId, serviceId), eq(deployments.status, "running")))
+    .run();
+}
+
+function normalizeRunningDeployments() {
+  const runningDeployments = db
+    .select({ id: deployments.id, serviceId: deployments.serviceId })
+    .from(deployments)
+    .where(eq(deployments.status, "running"))
+    .orderBy(desc(deployments.createdAt))
+    .all();
+  const latestByService = new Set<string>();
+
+  for (const deployment of runningDeployments) {
+    if (!latestByService.has(deployment.serviceId)) {
+      latestByService.add(deployment.serviceId);
+      continue;
+    }
+
+    db.update(deployments).set({ status: "superseded" }).where(eq(deployments.id, deployment.id)).run();
+  }
 }
 
 export function getServiceById(serviceId: string) {
@@ -123,7 +332,8 @@ export function allocateHostPort() {
 }
 
 export async function removeServiceRuntime(service: Service) {
-  const containerName = `deploy-${service.id.toLowerCase()}`;
+  const containerName = containerNameForService(service.id);
+  rmSync(staticSiteDirForService(service.id), { recursive: true, force: true });
   return new Promise<void>((resolvePromise) => {
     const child = spawn("docker", ["rm", "-f", containerName], {
       stdio: ["ignore", "pipe", "pipe"]
@@ -132,6 +342,45 @@ export async function removeServiceRuntime(service: Service) {
     child.on("error", () => resolvePromise());
     child.on("close", () => resolvePromise());
   });
+}
+
+function normalizedStaticOutputPath(staticOutput: string) {
+  return staticOutput.replace(/^\.?\/*/, "").replace(/\/+$/g, "");
+}
+
+function staticOutputPathInImage(service: Service, hasCustomCommands: boolean) {
+  const normalized = normalizedStaticOutputPath(service.staticOutput ?? "");
+  if (!normalized) return null;
+  if (hasCustomCommands && service.rootDir) {
+    return `/app/${service.rootDir.replace(/^\/+|\/+$/g, "")}/${normalized}`;
+  }
+  return `/app/${normalized}`;
+}
+
+async function exportStaticSiteFromImage(deployment: Deployment, service: Service, imageTag: string, hasCustomCommands: boolean) {
+  const imagePath = staticOutputPathInImage(service, hasCustomCommands);
+  if (!imagePath) {
+    throw new Error("Static output path is not configured");
+  }
+
+  const staticDir = staticSiteDirForService(service.id);
+  const exportContainer = `deploy-export-${safeDockerIdentifier(deployment.id, "export")}`;
+  rmSync(staticDir, { recursive: true, force: true });
+  mkdirSync(staticDir, { recursive: true });
+
+  appendDeploymentLog(deployment.id, `Exporting static output from ${imagePath}.`);
+  await runCommand("docker", ["create", "--name", exportContainer, imageTag], deployment.id);
+  try {
+    await runCommand("docker", ["cp", `${exportContainer}:${imagePath}/.`, staticDir], deployment.id);
+  } finally {
+    await runCommand("docker", ["rm", "-f", exportContainer], deployment.id).catch(() => {
+      appendDeploymentLog(deployment.id, `No export container named ${exportContainer} was left behind.`);
+    });
+  }
+
+  if (!existsSync(staticDir)) {
+    throw new Error(`Static output directory ${imagePath} could not be exported`);
+  }
 }
 
 export function enqueueDeployment(serviceId: string, options: EnqueueOptions) {
@@ -161,14 +410,15 @@ export function enqueueDeployment(serviceId: string, options: EnqueueOptions) {
 
 async function runDeployment(deployment: Deployment, service: Service) {
   const startedAt = now();
-  const imageTag = `deploy-${safeSlug(service.name)}-${service.id.toLowerCase()}:${deployment.id.toLowerCase()}`;
-  const containerName = `deploy-${service.id.toLowerCase()}`;
+  const imageRepository = `deploy-${safeSlug(service.name)}-${safeDockerIdentifier(service.id, "service")}`;
+  const imageVersion = safeDockerIdentifier(deployment.id, "latest");
+  const imageTag = `${imageRepository}:${imageVersion}`;
+  const containerName = containerNameForService(service.id);
   const buildRoot = resolve(config.dataDir, "builds", deployment.id);
   const sourceDir = join(buildRoot, "source");
   const appDir = service.rootDir ? join(sourceDir, service.rootDir) : sourceDir;
   const env = getEnvForService(service.id);
-  const authToken = service.githubToken ?? config.githubAccessToken;
-  const secrets = [authToken ?? "", ...Object.values(env)].filter(Boolean);
+  const secrets = [...Object.values(env)].filter(Boolean);
 
   rmSync(buildRoot, { recursive: true, force: true });
   mkdirSync(buildRoot, { recursive: true });
@@ -185,18 +435,24 @@ async function runDeployment(deployment: Deployment, service: Service) {
     if (config.deployDryRun) {
       appendDeploymentLog(deployment.id, "Dry-run mode is enabled. Skipping clone, Railpack build, and Docker run.");
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 800));
+      const deployedAt = now();
+      supersedeRunningDeployments(service.id);
       db.update(deployments)
-        .set({ status: "running", finishedAt: now(), imageTag, containerName })
+        .set({ status: "running", finishedAt: deployedAt, imageTag, containerName })
         .where(eq(deployments.id, deployment.id))
         .run();
       db.update(services)
-        .set({ status: "active", lastDeployedAt: now(), updatedAt: now() })
+        .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
         .where(eq(services.id, service.id))
         .run();
       appendDeploymentLog(deployment.id, `Dry-run deployment marked running on port ${service.hostPort}.`);
       return;
     }
 
+    const authToken = service.repoFullName ? await getCloneTokenForRepo(service.repoFullName) : service.githubToken ?? config.githubAccessToken;
+    if (authToken) {
+      secrets.push(authToken);
+    }
     const cloneUrl = cloneUrlWithToken(service.repoUrl, authToken);
     await runCommand("git", ["clone", "--depth", "1", "--branch", service.branch, cloneUrl, sourceDir], deployment.id, {
       redact: secrets
@@ -206,13 +462,27 @@ async function runDeployment(deployment: Deployment, service: Service) {
       await runCommand("git", ["checkout", deployment.commitSha], deployment.id, { cwd: sourceDir });
     }
 
+    const installCommand = service.installCommand ?? "";
+    const buildCommand = service.buildCommand ?? "";
+    const startCommand = service.startCommand ?? "";
+  const hasCustomCommands = Boolean(installCommand || buildCommand || startCommand);
+  const looksLikeBunProject = [installCommand, buildCommand, startCommand].some((command) => /\bbun\b/.test(command));
+  const customDockerfilePath = join(buildRoot, "Dockerfile.custom");
+  const isStaticService = Boolean(service.staticOutput?.trim());
+
     const railpackEnv: Record<string, string> = {
       ...env,
       BUILDKIT_HOST: config.buildkitHost,
       PORT: String(service.internalPort),
-      RAILPACK_START_CMD: service.startCommand ?? "",
-      RAILPACK_BUILD_CMD: service.buildCommand ?? "",
-      RAILPACK_INSTALL_CMD: service.installCommand ?? "",
+      // Railpack/Railway docs currently reference mixed naming for these overrides.
+      // Pass both variants so saved service commands actually win over auto-detection.
+      RAILPACK_START_CMD: startCommand,
+      RAILPACK_START_COMMAND: startCommand,
+      RAILPACK_BUILD_CMD: buildCommand,
+      RAILPACK_BUILD_COMMAND: buildCommand,
+      RAILPACK_INSTALL_CMD: installCommand,
+      RAILPACK_INSTALL_COMMAND: installCommand,
+      RAILPACK_PACKAGES: looksLikeBunProject ? "bun@latest" : "",
       FORCE_COLOR: "1"
     };
 
@@ -222,16 +492,63 @@ async function runDeployment(deployment: Deployment, service: Service) {
       }
     });
 
-    await runCommand(
-      "railpack",
-      ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id, appDir],
-      deployment.id,
-      { env: railpackEnv, redact: secrets }
-    );
+    if (installCommand) {
+      appendDeploymentLog(deployment.id, `Using custom install command: ${installCommand}`, "system", secrets);
+    }
+    if (buildCommand) {
+      appendDeploymentLog(deployment.id, `Using custom build command: ${buildCommand}`, "system", secrets);
+    }
+    if (startCommand) {
+      appendDeploymentLog(deployment.id, `Using custom start command: ${startCommand}`, "system", secrets);
+    }
+
+    if (hasCustomCommands) {
+      const dockerfile = createCustomDockerfile({
+        installCommand,
+        buildCommand,
+        startCommand: startCommand || "node server.js",
+        internalPort: service.internalPort,
+        looksLikeBunProject,
+        buildEnvKeys: Object.keys(env)
+      });
+      writeFileSync(customDockerfilePath, dockerfile);
+      appendDeploymentLog(deployment.id, `Using generated Dockerfile for custom commands (${looksLikeBunProject ? "bun" : "node"}).`);
+      const dockerBuildArgs = ["build", "-t", imageTag, "-f", customDockerfilePath];
+      for (const [key, value] of Object.entries(env)) {
+        dockerBuildArgs.push("--build-arg", `${key}=${value}`);
+      }
+      dockerBuildArgs.push(sourceDir);
+      await runCommand("docker", dockerBuildArgs, deployment.id, { redact: secrets });
+    } else {
+      await ensureBuildkitAvailable(deployment.id);
+      await runCommand(
+        "railpack",
+        ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id, appDir],
+        deployment.id,
+        { env: railpackEnv, redact: secrets }
+      );
+    }
 
     await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
       appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
     });
+
+    if (isStaticService) {
+      await exportStaticSiteFromImage(deployment, service, imageTag, hasCustomCommands);
+
+      const deployedAt = now();
+      supersedeRunningDeployments(service.id);
+      db.update(deployments).set({ status: "running", finishedAt: deployedAt }).where(eq(deployments.id, deployment.id)).run();
+      db.update(services)
+        .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
+        .where(eq(services.id, service.id))
+        .run();
+
+      const caddy = await writeAndReloadCaddy();
+      appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
+      appendDeploymentLog(deployment.id, `Static site is served on 127.0.0.1:${service.hostPort}.`);
+      return;
+    }
 
     const dockerArgs = ["run", "-d", "--restart", "unless-stopped", "--name", containerName, "-p", `127.0.0.1:${service.hostPort}:${service.internalPort}`];
     for (const [key, value] of Object.entries({ ...env, PORT: String(service.internalPort) })) {
@@ -241,9 +558,11 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
     await runCommand("docker", dockerArgs, deployment.id, { redact: secrets });
 
-    db.update(deployments).set({ status: "running", finishedAt: now() }).where(eq(deployments.id, deployment.id)).run();
+    const deployedAt = now();
+    supersedeRunningDeployments(service.id);
+    db.update(deployments).set({ status: "running", finishedAt: deployedAt }).where(eq(deployments.id, deployment.id)).run();
     db.update(services)
-      .set({ status: "active", lastDeployedAt: now(), updatedAt: now() })
+      .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
       .where(eq(services.id, service.id))
       .run();
 
@@ -251,10 +570,23 @@ async function runDeployment(deployment: Deployment, service: Service) {
     appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
     appendDeploymentLog(deployment.id, `Deployment is running on 127.0.0.1:${service.hostPort}.`);
   } catch (error) {
+    if (error instanceof DeploymentAbortedError) {
+      abortRequests.delete(deployment.id);
+      db.update(deployments).set({ status: "aborted", finishedAt: now() }).where(eq(deployments.id, deployment.id)).run();
+      db.update(services)
+        .set({ status: getLastLiveServiceStatus(service.id), updatedAt: now() })
+        .where(eq(services.id, service.id))
+        .run();
+      appendDeploymentLog(deployment.id, "Deployment aborted.", "stderr", secrets);
+      return;
+    }
+
     const message = error instanceof Error ? error.message : "Unknown deployment error";
     appendDeploymentLog(deployment.id, `Deployment failed: ${message}`, "stderr", secrets);
     db.update(deployments).set({ status: "failed", finishedAt: now() }).where(eq(deployments.id, deployment.id)).run();
     db.update(services).set({ status: "failed", updatedAt: now() }).where(eq(services.id, service.id)).run();
+  } finally {
+    abortRequests.delete(deployment.id);
   }
 }
 
@@ -296,6 +628,7 @@ export function startDeployWorker() {
   }
 
   workerStarted = true;
+  normalizeRunningDeployments();
   sqlite
     .prepare("UPDATE deployments SET status = 'failed', finished_at = ? WHERE status IN ('building')")
     .run(now());
