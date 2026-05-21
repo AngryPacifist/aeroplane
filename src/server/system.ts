@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
+import { config } from "./config.js";
 
 export type ToolCheck = {
   name: string;
@@ -26,13 +28,49 @@ function checkCommand(command: string, args: string[] = ["--version"]): Promise<
   });
 }
 
+function parseTcpTarget(address: string) {
+  const match = address.match(/^tcp:\/\/([^:/]+):(\d+)$/i);
+  if (!match) return null;
+  return { host: match[1], port: Number(match[2]) };
+}
+
+function checkTcpReachability(name: string, address: string, timeoutMs = 500): Promise<ToolCheck> {
+  const target = parseTcpTarget(address);
+  if (!target) {
+    return Promise.resolve({
+      name,
+      ok: false,
+      detail: `Unsupported address: ${address}`
+    });
+  }
+
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+
+    const finish = (ok: boolean, detail: string) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ name, ok, detail });
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true, `${target.host}:${target.port} reachable`));
+    socket.once("timeout", () => finish(false, `${target.host}:${target.port} timed out`));
+    socket.once("error", (error: Error) => finish(false, error.message));
+    socket.connect(target.port, target.host);
+  });
+}
+
 export async function getSystemChecks() {
-  const [git, docker, railpack, caddy] = await Promise.all([
+  const [git, docker, railpack, buildkit, caddy] = await Promise.all([
     checkCommand("git"),
     checkCommand("docker"),
     checkCommand("railpack"),
+    checkTcpReachability("buildkit", config.buildkitHost),
     checkCommand("caddy")
   ]);
 
-  return { tools: [git, docker, railpack, caddy] };
+  return { tools: [git, docker, railpack, buildkit, caddy] };
 }
