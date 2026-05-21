@@ -15,6 +15,9 @@ export type Service = {
   internalPort: number;
   hostPort: number;
   status: string;
+  reachable: boolean;
+  localUrl: string;
+  primaryUrl: string;
   lastDeployedAt: null | string;
   createdAt: string;
   updatedAt: string;
@@ -105,6 +108,16 @@ export type GitHubDirectory = {
   path: string;
   name: string;
   depth: number;
+  hasChildren: boolean;
+};
+
+export type GitHubStatus = {
+  appConfigured: boolean;
+  connected: boolean;
+  installationCount: number;
+  installed: boolean;
+  installUrl: null | string;
+  mode: "app" | "token" | "none";
 };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -126,11 +139,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   system: () => request<{ tools: ToolCheck[] }>("/api/system"),
-  githubStatus: () => request<{ connected: boolean }>("/api/github/status"),
+  githubStatus: () => request<GitHubStatus>("/api/github/status"),
   githubRepos: (query = "") => request<{ repos: GitHubRepo[] }>(`/api/github/repos?q=${encodeURIComponent(query)}`),
   githubBranches: (repoFullName: string) => request<{ branches: string[] }>(`/api/github/branches?repo=${encodeURIComponent(repoFullName)}`),
-  githubDirectories: (repoFullName: string, branch: string) =>
-    request<{ directories: GitHubDirectory[] }>(`/api/github/directories?repo=${encodeURIComponent(repoFullName)}&branch=${encodeURIComponent(branch)}`),
+  githubDirectories: (repoFullName: string, branch: string, path = "") =>
+    request<{ directories: GitHubDirectory[] }>(
+      `/api/github/directories?repo=${encodeURIComponent(repoFullName)}&branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`
+    ),
   projects: () => request<{ projects: ProjectCard[] }>("/api/projects"),
   project: (slug: string) => request<{ project: ProjectDetail }>(`/api/projects/${slug}`),
   createProject: (body: unknown) => request<{ project: ProjectDetail }>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
@@ -143,6 +158,8 @@ export const api = {
   deleteService: (serviceId: string) => request(`/api/services/${serviceId}`, { method: "DELETE" }),
   createDeployment: (serviceId: string) =>
     request<{ deployment: Deployment }>(`/api/services/${serviceId}/deployments`, { method: "POST" }),
+  abortDeployment: (deploymentId: string) =>
+    request<{ accepted: boolean }>(`/api/deployments/${deploymentId}/abort`, { method: "POST" }),
   deploymentLogs: (deploymentId: string) => request<{ logs: DeploymentLog[] }>(`/api/deployments/${deploymentId}/logs`),
   upsertEnv: (serviceId: string, body: unknown) =>
     request(`/api/services/${serviceId}/env`, { method: "POST", body: JSON.stringify(body) }),
