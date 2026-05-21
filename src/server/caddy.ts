@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { domains, services } from "./schema.js";
@@ -14,24 +15,63 @@ function caddyAddress(hostname: string) {
   return hostname === "localhost" || hostname.endsWith(".localhost") ? `http://${hostname}` : hostname;
 }
 
+function localPortAddress(hostPort: number) {
+  return `http://127.0.0.1:${hostPort}`;
+}
+
+function staticSiteDirForService(serviceId: string) {
+  return resolve(config.dataDir, "static-sites", serviceId);
+}
+
 export function renderCaddyfile() {
   const rows = db
     .select({
+      serviceId: services.id,
       hostname: domains.hostname,
-      serviceId: domains.serviceId,
-      hostPort: services.hostPort
+      hostPort: services.hostPort,
+      staticOutput: services.staticOutput
     })
     .from(domains)
     .innerJoin(services, eq(services.id, domains.serviceId))
     .where(and(eq(domains.status, "active"), eq(services.status, "active")))
     .all();
 
-  const blocks = rows.map(
-    (row) => `${caddyAddress(row.hostname)} {
+  const staticOnlyServices = db
+    .select({
+      serviceId: services.id,
+      hostPort: services.hostPort,
+      staticOutput: services.staticOutput
+    })
+    .from(services)
+    .where(and(eq(services.status, "active")))
+    .all()
+    .filter((row) => Boolean(row.staticOutput));
+
+  const blocks: string[] = [];
+
+  for (const row of rows) {
+    if (row.staticOutput) {
+      blocks.push(`${caddyAddress(row.hostname)} {
+  root * ${staticSiteDirForService(row.serviceId)}
+  try_files {path} {path}/ /index.html
+  file_server
+}`);
+      continue;
+    }
+
+    blocks.push(`${caddyAddress(row.hostname)} {
   encode zstd gzip
   reverse_proxy 127.0.0.1:${row.hostPort}
-}`
-  );
+}`);
+  }
+
+  for (const row of staticOnlyServices) {
+    blocks.push(`${localPortAddress(row.hostPort)} {
+  root * ${staticSiteDirForService(row.serviceId)}
+  try_files {path} {path}/ /index.html
+  file_server
+}`);
+  }
 
   return [`# Managed by Deploy. Manual changes may be overwritten.`, ...blocks].join("\n\n") + "\n";
 }
