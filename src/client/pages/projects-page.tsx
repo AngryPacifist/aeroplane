@@ -1,23 +1,39 @@
 import { useNavigate } from "@tanstack/react-router";
-import { AddSquareIcon, ArrowLeft01Icon, FolderCodeIcon, WorkflowSquare07Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon, FolderCodeIcon, Globe02Icon, WorkflowSquare07Icon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api";
-import { AppIcon } from "../components/ui/primitives";
+import { AppIcon, FrameworkMark } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
-import { formatTime } from "../lib/format";
 
-function StatusPill({ status }: { status: string }) {
-  const tone =
-    status === "active" || status === "running"
-      ? "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#4FB8B2]"
-      : status === "building" || status === "queued"
-        ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-        : status === "failed"
-          ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
-          : "border-zinc-700 bg-zinc-900/50 text-zinc-400";
+function ServiceCluster({ project }: { project: ProjectCard }) {
+  const previewServices = project.services.slice(0, 7);
+  const extraCount = Math.max(0, project.serviceCount - previewServices.length);
 
-  return <span className={`inline-flex border px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.2em] ${tone}`}>{status}</span>;
+  return (
+    <div className="border border-zinc-800/90 bg-zinc-950/55 p-2">
+      <div className="flex min-h-[150px] items-center justify-center bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[length:18px_18px] p-5">
+        <div className="grid grid-cols-4 gap-2">
+          {previewServices.map((service) => (
+            <div
+              key={service.id}
+              className="flex h-10 w-10 items-center justify-center border border-zinc-700 bg-zinc-900/92 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+            >
+              <FrameworkMark framework={service.framework} size={17} fallback={<AppIcon icon={Globe02Icon} size={15} className="text-zinc-400" />} />
+            </div>
+          ))}
+          {previewServices.length === 0 ? (
+            <div className="flex h-full min-h-[150px] items-center justify-center text-xs text-zinc-600">No services yet.</div>
+          ) : null}
+          {extraCount > 0 ? (
+            <div className="flex h-10 w-10 items-center justify-center border border-zinc-700 bg-zinc-900/92 font-mono text-xs tracking-[0.08em] text-zinc-400">
+              +{extraCount}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ProjectsPage() {
@@ -122,55 +138,36 @@ export function ProjectsPage() {
               </div>
             </section>
           ) : (
-            <section className="grid gap-5 xl:grid-cols-2">
+            <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
               {projects.map((project) => (
                 <button
                   key={project.id}
                   type="button"
-                  className="group border border-zinc-800 bg-zinc-950/60 p-6 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/70"
+                  className="group relative overflow-hidden border border-zinc-800 bg-zinc-950/68 p-5 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/72"
                   onClick={() => void navigate({ to: "/$projectSlug", params: { projectSlug: project.slug } })}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        <AppIcon icon={FolderCodeIcon} size={14} />
-                        {project.serviceCount} service{project.serviceCount === 1 ? "" : "s"}
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.028)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.028)_1px,transparent_1px)] bg-[size:72px_72px] opacity-50"
+                  />
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(79,184,178,0.06),transparent_55%)]"
+                  />
+
+                  <div className="relative z-10">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h2 className="font-sans text-lg font-semibold tracking-tight text-zinc-100">{project.name}</h2>
                       </div>
-                      <h2 className="mt-5 font-hero text-3xl font-bold tracking-tight text-zinc-100">{project.name}</h2>
-                      <p className="mt-3 max-w-xl font-mono text-xs leading-relaxed text-zinc-500">{project.description || "Scoped deploy space for related services."}</p>
+                      <span className="shrink-0 border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200">
+                        {project.serviceCount} service{project.serviceCount === 1 ? "" : "s"}
+                      </span>
                     </div>
-                    <StatusPill status={project.status} />
-                  </div>
 
-                  <div className="mt-8 overflow-x-auto border border-zinc-800 bg-zinc-950/80">
-                    <table className="w-full min-w-[32rem] border-collapse font-mono text-left text-sm">
-                      <thead>
-                        <tr className="border-b border-zinc-800 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
-                          <th className="px-4 py-3 font-medium">service</th>
-                          <th className="px-4 py-3 font-medium">repo</th>
-                          <th className="px-4 py-3 text-right font-medium">state</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {project.services.slice(0, 3).map((service) => (
-                          <tr key={service.id} className="border-b border-zinc-800/80 last:border-b-0">
-                            <td className="px-4 py-4 text-zinc-200">{service.name}</td>
-                            <td className="px-4 py-4 text-zinc-500">{service.repoFullName ?? service.repoUrl.replace(/^https?:\/\//, "")}</td>
-                            <td className="px-4 py-4 text-right">
-                              <StatusPill status={service.status} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="mt-5 flex items-center justify-between font-mono text-[11px] text-zinc-500">
-                    <span>updated {formatTime(project.lastUpdatedAt)}</span>
-                    <span className="inline-flex items-center gap-2 text-zinc-300 transition group-hover:text-[#4FB8B2]">
-                      inspect
-                      <AppIcon icon={ArrowLeft01Icon} size={16} className="rotate-180" />
-                    </span>
+                    <div className="mt-5">
+                      <ServiceCluster project={project} />
+                    </div>
                   </div>
                 </button>
               ))}
