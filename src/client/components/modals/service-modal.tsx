@@ -14,8 +14,10 @@ import {
   PencilEdit02Icon,
   Search01Icon,
   Settings01Icon,
-  WorkflowSquare07Icon
+  WorkflowSquare07Icon,
+  CloudServerIcon
 } from "@hugeicons/core-free-icons";
+import { Link } from "@tanstack/react-router";
 import { ClipboardEvent, FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
@@ -33,6 +35,7 @@ import {
   FieldLabel,
   FormInput,
   FormSelect,
+  FrameworkMark,
   SectionTitle,
   StatusPill,
   chipClass,
@@ -45,6 +48,7 @@ import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
 import type { ModalTab } from "./service-modal-types";
+import { EnvVarRow } from "./env-var-row";
 
 function formatBuildDuration(startedAt: null | string, finishedAt: null | string, nowMs: number) {
   const start = startedAt ? Date.parse(startedAt) : Number.NaN;
@@ -427,13 +431,13 @@ export function ServiceModal({
     await doAction("settings", async () => {
       await api.updateService(serviceId, {
         name: settings.name,
-        repoFullName: settings.repoFullName.trim() ? settings.repoFullName : null,
+        repoFullName: isDatabase ? settings.repoFullName : (settings.repoFullName.trim() ? settings.repoFullName : null),
         branch: settings.branch,
-        rootDir: settings.rootDir || undefined,
-        installCommand: settings.installCommand || undefined,
-        buildCommand: settings.buildCommand || undefined,
-        startCommand: settings.startCommand || undefined,
-        staticOutput: settings.staticOutput || undefined,
+        rootDir: isDatabase ? undefined : (settings.rootDir || undefined),
+        installCommand: isDatabase ? undefined : (settings.installCommand || undefined),
+        buildCommand: isDatabase ? undefined : (settings.buildCommand || undefined),
+        startCommand: isDatabase ? undefined : (settings.startCommand || undefined),
+        staticOutput: isDatabase ? undefined : (settings.staticOutput || undefined),
         internalPort: Number(settings.internalPort)
       });
     });
@@ -490,6 +494,7 @@ export function ServiceModal({
   }
 
   const service = overview?.service;
+  const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
   const deployments = overview?.deployments ?? [];
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
@@ -505,22 +510,30 @@ export function ServiceModal({
         <div className="mx-auto flex min-h-full max-w-6xl items-center justify-center">
           <div className="flex h-[min(860px,calc(100vh-2rem))] min-h-[680px] w-full flex-col border border-zinc-700/90 bg-zinc-900/98 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)] md:p-7">
             <div className="flex flex-col gap-4 pb-5 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex items-start gap-4">
-                <div className="grid h-12 w-12 place-items-center border border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#7fe3dd]">
-                  <AppIcon icon={FolderCodeIcon} size={20} />
-                </div>
-                <div>
-                  <div className="mb-2 inline-flex items-center gap-2 border border-zinc-700 bg-zinc-800/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-400">
-                    <AppIcon icon={FolderCodeIcon} size={14} />
-                    {projectSlug}
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden border border-zinc-700 bg-zinc-900/90 p-2.5 text-zinc-300">
+                    <FrameworkMark framework={service?.framework ?? null} size={18} fallback={<AppIcon icon={Globe02Icon} size={18} />} />
                   </div>
-                  <h2 className="font-hero text-3xl tracking-tight text-zinc-100">{service?.name ?? "Service"}</h2>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
-                    <span>{service?.repoFullName ?? service?.repoUrl}</span>
-                    {service ? <StatusPill status={service.status} /> : null}
+                  <div className="min-w-0">
+                    <div className="mb-2 inline-flex max-w-full items-center gap-2 border border-zinc-700 bg-zinc-800/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-400">
+                      <AppIcon icon={isDatabase ? CloudServerIcon : GithubIcon} size={14} />
+                      <span className="truncate">{isDatabase ? "Database Service" : (service?.repoFullName ?? service?.repoUrl)}</span>
+                    </div>
+                    <h2 className="truncate font-hero text-2xl tracking-tight text-zinc-100">{service?.name ?? "Service"}</h2>
+                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+                      <Link
+                        to="/$projectSlug"
+                        params={{ projectSlug }}
+                        search={{}}
+                        className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400 transition hover:text-[#7fe3dd]"
+                      >
+                        <AppIcon icon={FolderCodeIcon} size={14} />
+                        <span className="truncate">{projectSlug}</span>
+                      </Link>
+                      {service ? <StatusPill status={service.status} /> : null}
+                    </div>
                   </div>
                 </div>
-              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" className={shellButton("secondary")} onClick={() => void doAction("deploy", async () => void api.createDeployment(serviceId))} disabled={busy === "deploy"}>
                   <AppIcon icon={WorkflowSquare07Icon} size={16} />
@@ -554,44 +567,47 @@ export function ServiceModal({
                 <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
                   <div className="min-h-0 overflow-y-auto pr-1 lg:w-[340px] lg:flex-none">
                     <div className="space-y-3">
-                    {deployments.map((deployment) => (
-                      <button
-                        key={deployment.id}
-                        type="button"
-                        className={`flex w-full items-center justify-between border px-4 py-3 text-left ${deploymentCardClass(
-                          deployment.status,
-                          deployment.id === activeDeploymentId
-                        )}`}
-                        onClick={() => {
-                          setActiveDeploymentId(deployment.id);
-                        }}
-                      >
-                        <div>
-                          <div className="text-sm font-medium">{shortSha(deployment.commitSha)}</div>
-                          <div
-                            className={`mt-1 text-xs ${
-                              deployment.id === activeDeploymentId
-                                ? deployment.status === "failed"
-                                  ? "text-red-700"
-                                  : deployment.status === "building" || deployment.status === "queued"
-                                    ? "text-amber-700"
-                                    : deployment.status === "active" || deployment.status === "running"
-                                      ? "text-emerald-700"
-                                      : deployment.status === "superseded"
-                                        ? "text-zinc-400"
-                                        : "text-zinc-300"
-                                : "text-zinc-400"
-                            }`}
-                          >
-                            {formatTime(deployment.createdAt)}
-                            {deployment.status === "queued" || deployment.status === "building"
-                              ? ` • ${formatBuildDuration(deployment.startedAt ?? deployment.createdAt, deployment.finishedAt, nowMs) ?? "0s"}`
-                              : ""}
+                    {deployments.map((deployment) => {
+                      const displayStatus = deployment.status === "running" ? "deployed" : deployment.status;
+                      return (
+                        <button
+                          key={deployment.id}
+                          type="button"
+                          className={`flex w-full items-center justify-between border px-4 py-3 text-left ${deploymentCardClass(
+                            displayStatus,
+                            deployment.id === activeDeploymentId
+                          )}`}
+                          onClick={() => {
+                            setActiveDeploymentId(deployment.id);
+                          }}
+                        >
+                          <div>
+                            <div className="text-sm font-medium">{shortSha(deployment.commitSha)}</div>
+                            <div
+                              className={`mt-1 text-xs ${
+                                deployment.id === activeDeploymentId
+                                  ? displayStatus === "failed"
+                                    ? "text-red-700"
+                                    : displayStatus === "building" || displayStatus === "queued"
+                                      ? "text-amber-700"
+                                      : displayStatus === "active" || displayStatus === "deployed"
+                                        ? "text-emerald-700"
+                                        : displayStatus === "superseded"
+                                          ? "text-zinc-400"
+                                          : "text-zinc-300"
+                                  : "text-zinc-400"
+                              }`}
+                            >
+                              {formatTime(deployment.createdAt)}
+                              {deployment.status === "queued" || deployment.status === "building"
+                                ? ` • ${formatBuildDuration(deployment.startedAt ?? deployment.createdAt, deployment.finishedAt, nowMs) ?? "0s"}`
+                                : ""}
+                            </div>
                           </div>
-                        </div>
-                        <StatusPill status={deployment.status} />
-                      </button>
-                    ))}
+                          <StatusPill status={displayStatus} />
+                        </button>
+                      );
+                    })}
                     </div>
                   </div>
                   <div className="min-h-0 min-w-0 flex-1">
@@ -696,20 +712,24 @@ export function ServiceModal({
                       <div className="px-5 py-8 text-sm text-zinc-400">No service variables yet.</div>
                     ) : (
                       filteredEnv.map((item) => (
-                        <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_180px_56px] items-center gap-4 border-b border-zinc-800 px-5 py-4 last:border-b-0">
-                          <div className="flex min-w-0 items-center gap-4">
-                            <span className="font-mono text-lg text-zinc-500">{`{ }`}</span>
-                            <span className="truncate font-mono text-[15px] uppercase tracking-[0.06em] text-zinc-100">{item.key}</span>
-                          </div>
-                          <div className="font-mono text-[15px] text-zinc-300">********</div>
-                          <button
-                            type="button"
-                            className="ml-auto inline-flex h-9 w-9 items-center justify-center text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
-                            onClick={() => void doAction("env", async () => void api.deleteEnv(serviceId, item.id))}
-                          >
-                            <AppIcon icon={MoreVerticalIcon} size={18} />
-                          </button>
-                        </div>
+                        <EnvVarRow
+                          key={item.id}
+                          item={item}
+                          busy={busy === "env"}
+                          onSave={async (key, value) => {
+                            await doAction("env", async () => {
+                              if (key !== item.key) {
+                                await api.deleteEnv(serviceId, item.id);
+                              }
+                              await api.upsertEnv(serviceId, { key, value });
+                            });
+                          }}
+                          onDelete={async () => {
+                            await doAction("env", async () => {
+                              await api.deleteEnv(serviceId, item.id);
+                            });
+                          }}
+                        />
                       ))
                     )}
                   </div>
@@ -762,112 +782,132 @@ export function ServiceModal({
               {selectedTab === "settings" ? (
                 <form onSubmit={saveSettings} className="space-y-5">
                   <div className="grid gap-5 xl:grid-cols-2">
-                    <div className="xl:col-span-2">
-                      <FieldLabel>Repository</FieldLabel>
-                      <div className="space-y-3 border border-zinc-700 bg-zinc-900/88 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-[18px] text-zinc-100">{settings.repoFullName || "Disconnected"}</div>
-                          <div className="flex items-center gap-2">
-                            <button type="button" className={shellButton("secondary")} onClick={() => setSourcePickerOpen(true)}>
-                              <AppIcon icon={PencilEdit02Icon} size={15} />
-                              Change source
-                            </button>
+                    {isDatabase ? (
+                      <>
+                        <div>
+                          <FieldLabel>Service name</FieldLabel>
+                          <FormInput value={settings.name} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
+                        </div>
+                        <div>
+                          <FieldLabel>Database port (Internal)</FieldLabel>
+                          <FormInput type="number" value={settings.internalPort} onChange={(event) => setSettings({ ...settings, internalPort: Number(event.target.value) })} />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="xl:col-span-2">
+                          <FieldLabel>Repository</FieldLabel>
+                          <div className="space-y-3 border border-zinc-700 bg-zinc-900/88 p-4">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-[18px] text-zinc-100">{settings.repoFullName || "Disconnected"}</div>
+                              <div className="flex items-center gap-2">
+                                <button type="button" className={shellButton("secondary")} onClick={() => setSourcePickerOpen(true)}>
+                                  <AppIcon icon={PencilEdit02Icon} size={15} />
+                                  Change source
+                                </button>
+                                <button
+                                  type="button"
+                                  className={shellButton("ghost")}
+                                  onClick={() => {
+                                    setSettings((current) => ({ ...current, repoFullName: "" }));
+                                    setSourceQuery("");
+                                    setSourceRepos([]);
+                                    setSourcePickerOpen(false);
+                                  }}
+                                >
+                                  <AppIcon icon={Cancel01Icon} size={15} />
+                                  Disconnect
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <FieldLabel>Branch</FieldLabel>
+                          <button
+                            type="button"
+                            className="flex h-11 w-full items-center justify-between border border-zinc-700 bg-zinc-900 px-3 text-left text-sm text-zinc-100"
+                            onClick={() => setBranchMenuOpen((current) => !current)}
+                            disabled={!settings.repoFullName}
+                          >
+                            <span>{settings.branch || "Select branch"}</span>
+                            <AppIcon icon={ArrowLeft01Icon} size={16} className={branchMenuOpen ? "rotate-90" : "-rotate-90"} />
+                          </button>
+                          {branchMenuOpen ? (
+                            <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 max-h-64 overflow-auto border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+                              {(settingsBranches.length ? settingsBranches : [settings.branch]).map((branch) => (
+                                <button
+                                  key={branch}
+                                  type="button"
+                                  className="flex w-full items-center justify-between border-b border-zinc-800 px-3 py-3 text-left text-sm text-zinc-100 last:border-b-0 hover:bg-zinc-800"
+                                  onClick={() => {
+                                    setSettings((current) => ({ ...current, branch }));
+                                    setBranchMenuOpen(false);
+                                    setSettingsDirectoryNodes({});
+                                    setSettingsExpandedDirectories(new Set());
+                                  }}
+                                >
+                                  <span>{branch}</span>
+                                  {settings.branch === branch ? <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7fe3dd]">Current</span> : null}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <FieldLabel>Directory</FieldLabel>
+                          <div className="flex h-11 items-center justify-between gap-3 border border-zinc-700 bg-zinc-900 px-3">
+                            <div className="truncate text-sm text-zinc-100">{settings.rootDir || "."}</div>
                             <button
                               type="button"
-                              className={shellButton("ghost")}
-                              onClick={() => {
-                                setSettings((current) => ({ ...current, repoFullName: "" }));
-                                setSourceQuery("");
-                                setSourceRepos([]);
-                                setSourcePickerOpen(false);
-                              }}
+                              className="inline-flex h-9 items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:opacity-60"
+                              onClick={() => setDirectoryPickerOpen(true)}
+                              disabled={!settings.repoFullName}
                             >
-                              <AppIcon icon={Cancel01Icon} size={15} />
-                              Disconnect
+                              <AppIcon icon={PencilEdit02Icon} size={15} />
+                              Edit
                             </button>
                           </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="relative">
-                      <FieldLabel>Branch</FieldLabel>
-                      <button
-                        type="button"
-                        className="flex h-11 w-full items-center justify-between border border-zinc-700 bg-zinc-900 px-3 text-left text-sm text-zinc-100"
-                        onClick={() => setBranchMenuOpen((current) => !current)}
-                        disabled={!settings.repoFullName}
-                      >
-                        <span>{settings.branch || "Select branch"}</span>
-                        <AppIcon icon={ArrowLeft01Icon} size={16} className={branchMenuOpen ? "rotate-90" : "-rotate-90"} />
-                      </button>
-                      {branchMenuOpen ? (
-                        <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 max-h-64 overflow-auto border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
-                          {(settingsBranches.length ? settingsBranches : [settings.branch]).map((branch) => (
-                            <button
-                              key={branch}
-                              type="button"
-                              className="flex w-full items-center justify-between border-b border-zinc-800 px-3 py-3 text-left text-sm text-zinc-100 last:border-b-0 hover:bg-zinc-800"
-                              onClick={() => {
-                                setSettings((current) => ({ ...current, branch }));
-                                setBranchMenuOpen(false);
-                                setSettingsDirectoryNodes({});
-                                setSettingsExpandedDirectories(new Set());
-                              }}
-                            >
-                              <span>{branch}</span>
-                              {settings.branch === branch ? <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7fe3dd]">Current</span> : null}
-                            </button>
-                          ))}
+                        <div>
+                          <FieldLabel>Service name</FieldLabel>
+                          <FormInput value={settings.name} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
                         </div>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <FieldLabel>Directory</FieldLabel>
-                      <div className="flex h-11 items-center justify-between gap-3 border border-zinc-700 bg-zinc-900 px-3">
-                        <div className="truncate text-sm text-zinc-100">{settings.rootDir || "."}</div>
-                        <button
-                          type="button"
-                          className="inline-flex h-9 items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:opacity-60"
-                          onClick={() => setDirectoryPickerOpen(true)}
-                          disabled={!settings.repoFullName}
-                        >
-                          <AppIcon icon={PencilEdit02Icon} size={15} />
-                          Edit
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <FieldLabel>Service name</FieldLabel>
-                      <FormInput value={settings.name} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
-                    </div>
-                    <div>
-                      <FieldLabel>App port</FieldLabel>
-                      <FormInput type="number" value={settings.internalPort} onChange={(event) => setSettings({ ...settings, internalPort: Number(event.target.value) })} />
-                    </div>
-                    <div>
-                      <FieldLabel>Install command</FieldLabel>
-                      <FormInput value={settings.installCommand} onChange={(event) => setSettings({ ...settings, installCommand: event.target.value })} placeholder="auto" />
-                    </div>
-                    <div>
-                      <FieldLabel>Build command</FieldLabel>
-                      <FormInput value={settings.buildCommand} onChange={(event) => setSettings({ ...settings, buildCommand: event.target.value })} placeholder="auto" />
-                    </div>
-                    <div>
-                      <FieldLabel>Start command</FieldLabel>
-                      <FormInput value={settings.startCommand} onChange={(event) => setSettings({ ...settings, startCommand: event.target.value })} placeholder="auto" />
-                    </div>
-                    <div>
-                      <FieldLabel>Static output</FieldLabel>
-                      <FormInput value={settings.staticOutput} onChange={(event) => setSettings({ ...settings, staticOutput: event.target.value })} placeholder="auto" />
-                    </div>
+                        <div>
+                          <FieldLabel>App port</FieldLabel>
+                          <FormInput type="number" value={settings.internalPort} onChange={(event) => setSettings({ ...settings, internalPort: Number(event.target.value) })} />
+                        </div>
+                        <div>
+                          <FieldLabel>Install command</FieldLabel>
+                          <FormInput value={settings.installCommand} onChange={(event) => setSettings({ ...settings, installCommand: event.target.value })} placeholder="auto" />
+                        </div>
+                        <div>
+                          <FieldLabel>Build command</FieldLabel>
+                          <FormInput value={settings.buildCommand} onChange={(event) => setSettings({ ...settings, buildCommand: event.target.value })} placeholder="auto" />
+                        </div>
+                        <div>
+                          <FieldLabel>Start command</FieldLabel>
+                          <FormInput value={settings.startCommand} onChange={(event) => setSettings({ ...settings, startCommand: event.target.value })} placeholder="auto" />
+                        </div>
+                        <div>
+                          <FieldLabel>Static output</FieldLabel>
+                          <FormInput value={settings.staticOutput} onChange={(event) => setSettings({ ...settings, staticOutput: event.target.value })} placeholder="auto" />
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   <div className="flex justify-between gap-3 border-t border-zinc-800 pt-5">
                     <div className="flex items-center gap-3">
-                      {service?.reachable ? (
+                      {isDatabase ? (
+                        <div className="flex items-center gap-3 border border-zinc-700 bg-zinc-900/85 px-3 py-3 text-sm text-zinc-200">
+                          <BrowserIconFallback size={17} />
+                          <span className="truncate">Connect at 127.0.0.1:{service?.hostPort}</span>
+                        </div>
+                      ) : service?.reachable ? (
                         <a
                           href={service.primaryUrl}
                           target="_blank"
@@ -880,7 +920,7 @@ export function ServiceModal({
                       ) : (
                         <div className="flex items-center gap-3 border border-rose-500/20 bg-rose-950/20 px-3 py-3 text-sm text-rose-200">
                           <BrowserIconFallback size={17} />
-                          <span className="truncate">Service not reachable</span>
+                          <span className="truncate">Service crashed</span>
                         </div>
                       )}
                     </div>
