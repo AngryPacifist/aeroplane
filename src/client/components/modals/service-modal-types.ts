@@ -5,6 +5,7 @@ export const modalTabs: ModalTab[] = ["deployments", "logs", "environment", "dom
 export type ServiceFormPayload = {
   name: string;
   repoFullName: string;
+  repoUrl?: string;
   branch: string;
   rootDir?: string;
   internalPort: number;
