@@ -1,3 +1,10 @@
+export type Framework = {
+  slug: string;
+  name: string;
+  logoUrl: null | string;
+  website: null | string;
+};
+
 export type Service = {
   id: string;
   projectId: string;
@@ -18,6 +25,7 @@ export type Service = {
   reachable: boolean;
   localUrl: string;
   primaryUrl: string;
+  framework: Framework | null;
   lastDeployedAt: null | string;
   createdAt: string;
   updatedAt: string;
@@ -149,6 +157,8 @@ export const api = {
   projects: () => request<{ projects: ProjectCard[] }>("/api/projects"),
   project: (slug: string) => request<{ project: ProjectDetail }>(`/api/projects/${slug}`),
   createProject: (body: unknown) => request<{ project: ProjectDetail }>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
+  updateProject: (projectId: string, body: unknown) =>
+    request<{ project: ProjectDetail }>(`/api/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(body) }),
   createService: (projectId: string, body: unknown) =>
     request<{ service: Service }>(`/api/projects/${projectId}/services`, { method: "POST", body: JSON.stringify(body) }),
   deleteProject: (projectId: string) => request(`/api/projects/${projectId}`, { method: "DELETE" }),
