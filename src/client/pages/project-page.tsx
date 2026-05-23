@@ -3,20 +3,24 @@ import {
   AddSquareIcon,
   ArrowLeft01Icon,
   CloudServerIcon,
+  CheckmarkCircle02Icon,
+  Cancel01Icon,
   Delete02Icon,
   FolderCodeIcon,
   FolderOpenIcon,
   GitBranchIcon,
-  PackageIcon,
-  WorkflowSquare07Icon
+  GithubIcon,
+  PencilEdit02Icon,
+  Globe02Icon
 } from "@hugeicons/core-free-icons";
-import { startTransition, useCallback, useEffect, useState } from "react";
-import { api, type ProjectDetail, type ToolCheck } from "../api";
-import { AppIcon, BrowserIconFallback, InfoRow } from "../components/ui/primitives";
-import { CreateProjectModal } from "../features/projects/create-project-modal";
+import { FormEvent, startTransition, useCallback, useEffect, useState } from "react";
+import { api, type ProjectDetail } from "../api";
+import { AppIcon, FieldLabel, FormInput, FrameworkMark, shellButton } from "../components/ui/primitives";
 import { CreateServiceModal } from "../components/modals/create-service-modal";
+import { DeleteProjectModal } from "../components/modals/delete-project-modal";
 import { ServiceModal } from "../components/modals/service-modal";
 import type { ModalTab, ServiceFormPayload } from "../components/modals/service-modal-types";
+import { formatTime } from "../lib/format";
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -24,7 +28,9 @@ function StatusPill({ status }: { status: string }) {
       ? "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#4FB8B2]"
       : status === "building" || status === "queued"
         ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-        : status === "failed"
+        : status === "crashed"
+          ? "border-orange-500/30 bg-orange-500/10 text-orange-300"
+          : status === "failed"
           ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
           : "border-zinc-700 bg-zinc-900/50 text-zinc-400";
 
@@ -42,9 +48,12 @@ export function ProjectPage({
 }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<null | ProjectDetail>(null);
-  const [tools, setTools] = useState<ToolCheck[]>([]);
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createServiceOpen, setCreateServiceOpen] = useState(false);
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
+  const [projectForm, setProjectForm] = useState({ name: "", description: "" });
   const [error, setError] = useState("");
 
   const loadProject = useCallback(async () => {
@@ -61,24 +70,9 @@ export function ProjectPage({
     }
   }, [projectSlug]);
 
-  const loadSystem = useCallback(async () => {
-    try {
-      const systemData = await api.system();
-      startTransition(() => {
-        setTools(systemData.tools);
-      });
-    } catch {
-      // Ignore system shell issues.
-    }
-  }, []);
-
   useEffect(() => {
     void loadProject();
   }, [loadProject, projectSlug]);
-
-  useEffect(() => {
-    void loadSystem();
-  }, [loadSystem]);
 
   useEffect(() => {
     if (!project?.services.some((service) => service.status === "building")) return;
@@ -88,24 +82,51 @@ export function ProjectPage({
     return () => clearInterval(interval);
   }, [loadProject, project]);
 
-  const selectedService = project?.services.find((service) => service.id === selectedServiceId) ?? null;
+  useEffect(() => {
+    if (!project || editingProject) return;
+    setProjectForm({ name: project.name, description: project.description ?? "" });
+  }, [editingProject, project]);
 
-  async function createProject(payload: { name: string; description?: string }) {
-    const result = await api.createProject(payload);
-    void navigate({ to: "/$projectSlug", params: { projectSlug: result.project.slug } });
-  }
+  const selectedService = project?.services.find((service) => service.id === selectedServiceId) ?? null;
 
   async function createService(payload: ServiceFormPayload) {
     if (!project) return;
     const result = await api.createService(project.id, payload);
+    await api.createDeployment(result.service.id);
     await loadProject();
     void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: result.service.id, tab: "deployments" } });
   }
 
+  async function saveProject(event: FormEvent) {
+    event.preventDefault();
+    if (!project) return;
+    setSavingProject(true);
+    setError("");
+    try {
+      const result = await api.updateProject(project.id, {
+        name: projectForm.name,
+        description: projectForm.description
+      });
+      startTransition(() => {
+        setProject(result.project);
+        setEditingProject(false);
+      });
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not update project");
+    } finally {
+      setSavingProject(false);
+    }
+  }
+
   async function deleteProject() {
-    if (!project || !window.confirm(`Delete project "${project.name}" and all its services?`)) return;
-    await api.deleteProject(project.id);
-    void navigate({ to: "/" });
+    if (!project) return;
+    setDeletingProject(true);
+    try {
+      await api.deleteProject(project.id);
+      void navigate({ to: "/" });
+    } finally {
+      setDeletingProject(false);
+    }
   }
 
   return (
@@ -122,25 +143,64 @@ export function ProjectPage({
         />
 
         <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 pb-24 pt-14 sm:px-6 lg:pl-14 lg:pr-10">
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/90 pb-5 font-mono text-[11px] text-zinc-500">
-            <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center border border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#4FB8B2]">
-                <AppIcon icon={WorkflowSquare07Icon} size={18} />
-              </div>
-              <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600">Deploy registry</div>
-                <div className="font-hero text-lg tracking-tight text-zinc-100">{project?.name ?? projectSlug}</div>
-              </div>
+          <section className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="min-w-0 flex-1">
+              <Link to="/" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-500 transition hover:text-[#4FB8B2]">
+                <AppIcon icon={ArrowLeft01Icon} size={16} />
+                All projects
+              </Link>
+              {editingProject ? (
+                <form onSubmit={saveProject} className="mt-4 max-w-2xl space-y-3">
+                  <div>
+                    <FieldLabel>Project name</FieldLabel>
+                    <FormInput value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} required />
+                  </div>
+                  <div>
+                    <FieldLabel>Description</FieldLabel>
+                    <FormInput
+                      value={projectForm.description}
+                      onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })}
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="submit" className={shellButton("primary")} disabled={savingProject || !project}>
+                      <AppIcon icon={CheckmarkCircle02Icon} size={16} />
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className={shellButton("ghost")}
+                      onClick={() => {
+                        setProjectForm({ name: project?.name ?? "", description: project?.description ?? "" });
+                        setEditingProject(false);
+                      }}
+                      disabled={savingProject}
+                    >
+                      <AppIcon icon={Cancel01Icon} size={16} />
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="mt-4 flex min-w-0 items-start gap-3">
+                  <div className="min-w-0">
+                    <h1 className="font-hero text-3xl font-extrabold tracking-tight text-zinc-100 sm:text-4xl">{project?.name ?? projectSlug}</h1>
+                    {project?.description ? <p className="mt-2 max-w-2xl font-mono text-sm leading-relaxed text-zinc-500">{project.description}</p> : null}
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-1 inline-flex h-9 w-9 flex-none items-center justify-center border border-zinc-700 text-zinc-300 transition hover:border-[#4FB8B2]/50 hover:bg-[#4FB8B2]/10 hover:text-[#7fe3dd]"
+                    onClick={() => setEditingProject(true)}
+                    aria-label="Edit project"
+                    disabled={!project}
+                  >
+                    <AppIcon icon={PencilEdit02Icon} size={15} />
+                  </button>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-2 lg:flex">
-                {tools.slice(0, 4).map((tool) => (
-                  <div key={tool.name} className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                    <span className={`h-1.5 w-1.5 rounded-full ${tool.ok ? "bg-[#4FB8B2]" : "bg-zinc-700"}`} />
-                    {tool.name}
-                  </div>
-                ))}
-              </div>
               <button
                 type="button"
                 className="inline-flex items-center justify-center gap-2 border border-[#4FB8B2]/50 bg-[#4FB8B2]/15 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#4FB8B2] transition-colors hover:bg-[#4FB8B2]/25"
@@ -149,35 +209,13 @@ export function ProjectPage({
                 <AppIcon icon={AddSquareIcon} size={16} />
                 New service
               </button>
-            </div>
-          </header>
-
-          <section className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <Link to="/" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-500 transition hover:text-[#4FB8B2]">
-                <AppIcon icon={ArrowLeft01Icon} size={16} />
-                All projects
-              </Link>
-              <h1 className="mt-5 font-hero text-4xl font-extrabold tracking-tight text-zinc-100 sm:text-5xl">{project?.name ?? projectSlug}</h1>
-              <p className="mt-4 max-w-2xl font-mono text-sm leading-relaxed text-zinc-500">{project?.description || "Services scoped inside this project."}</p>
-            </div>
-            <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 border border-zinc-700 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-zinc-300 transition-colors hover:border-[#4FB8B2]/55 hover:bg-[#4FB8B2]/10 hover:text-[#4FB8B2]"
-                onClick={() => setCreateProjectOpen(true)}
-              >
-                <AppIcon icon={FolderCodeIcon} size={16} />
-                New project
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 border border-zinc-700 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-zinc-300 transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-300"
-                onClick={() => void deleteProject()}
-                disabled={!project}
+                className="inline-flex h-10 w-10 items-center justify-center border border-zinc-700 text-zinc-300 transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-50"
+                onClick={() => setDeleteProjectOpen(true)}
+                aria-label="Delete project"
               >
                 <AppIcon icon={Delete02Icon} size={16} />
-                Delete project
               </button>
             </div>
           </section>
@@ -206,59 +244,111 @@ export function ProjectPage({
               </div>
             </section>
           ) : (
-            <section className="grid gap-5 xl:grid-cols-2">
+            <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
               {project.services.map((service) => {
+                const isDatabase = service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
                 const visibleUrl = service.primaryUrl || service.localUrl;
                 const visibleLabel = visibleUrl.replace(/^https?:\/\//, "");
+                const repoLabel = service.repoFullName ?? service.repoUrl.replace(/^https?:\/\//, "").replace(/^github\.com\//, "");
+                const rootLabel = service.rootDir ? service.rootDir : "repository root";
+                const unavailableLabel = service.status === "crashed" ? "Crashed" : service.status === "failed" ? "Failed" : "Not reachable";
+                const unavailableClass = service.status === "crashed" ? "text-orange-300/80" : service.status === "failed" ? "text-rose-300/80" : "text-zinc-500";
 
                 return (
-                  <button
+                  <article
                     key={service.id}
-                    type="button"
-                    className="group border border-zinc-800 bg-zinc-950/60 p-6 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/70"
+                    role="button"
+                    tabIndex={0}
+                    className="group relative border border-zinc-800 bg-zinc-950/60 p-5 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/70"
                     onClick={() => void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: service.id, tab: "deployments" } })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: service.id, tab: "deployments" } });
+                      }
+                    }}
                   >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                        <AppIcon icon={PackageIcon} size={14} />
-                        Service
+                    <div className="relative z-10">
+                      <div className="flex items-start gap-4">
+                        <div className="grid h-12 w-12 flex-none place-items-center border border-zinc-700 bg-zinc-900/90 p-3">
+                           <FrameworkMark framework={service.framework} size={24} fallback={<AppIcon icon={isDatabase ? CloudServerIcon : Globe02Icon} size={20} className="text-zinc-400" />} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h2 className="truncate font-sans text-xl font-semibold tracking-tight text-zinc-100">{service.name}</h2>
+                              {isDatabase ? (
+                                <div className="mt-1 truncate text-sm text-zinc-500 font-mono">
+                                  Connect at 127.0.0.1:{service.hostPort}
+                                </div>
+                              ) : service.reachable ? (
+                                <a
+                                  href={visibleUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-1 block truncate text-sm text-zinc-500 transition hover:text-[#7fe3dd]"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {visibleLabel}
+                                </a>
+                              ) : (
+                                <div className={`mt-1 truncate text-sm ${unavailableClass}`}>{unavailableLabel}</div>
+                              )}
+                            </div>
+                            <StatusPill status={service.status} />
+                          </div>
+                        </div>
                       </div>
-                      <h2 className="mt-5 font-hero text-3xl font-bold tracking-tight text-zinc-100">{service.name}</h2>
-                    </div>
-                    <StatusPill status={service.status} />
-                  </div>
 
-                  <div className="mt-7 grid gap-3 sm:grid-cols-3">
-                    <InfoRow icon={GitBranchIcon} label={service.branch} />
-                    <InfoRow icon={FolderOpenIcon} label={service.rootDir || "Repository root"} />
-                    {service.reachable ? (
-                      <a
-                        href={visibleUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-3 border border-zinc-700 bg-zinc-900/85 px-3 py-3 text-sm text-zinc-200 transition hover:border-[#4FB8B2]/45 hover:text-[#7fe3dd]"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <BrowserIconFallback size={17} />
-                        <span className="truncate">{visibleLabel}</span>
-                      </a>
-                    ) : (
-                      <div className="flex items-center gap-3 border border-rose-500/20 bg-rose-950/20 px-3 py-3 text-sm text-rose-200">
-                        <BrowserIconFallback size={17} />
-                        <span className="truncate">Not reachable</span>
-                      </div>
-                    )}
-                  </div>
-                  </button>
+                      {isDatabase ? (
+                        <>
+                          <div className="mt-5 inline-flex max-w-full items-center gap-2 rounded-full bg-zinc-800/90 px-3 py-1.5 text-xs font-normal text-zinc-300">
+                            <AppIcon icon={CloudServerIcon} size={15} className="flex-none" />
+                            <span className="truncate">Database Service</span>
+                          </div>
+
+                          <div className="mt-4 flex flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
+                            <span>{formatTime(service.lastDeployedAt ?? service.updatedAt)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mt-5 inline-flex max-w-full items-center gap-2 rounded-full bg-zinc-800/90 px-3 py-1.5 text-xs font-normal text-zinc-300">
+                            <AppIcon icon={GithubIcon} size={15} className="flex-none" />
+                            <span className="truncate">{repoLabel}</span>
+                          </div>
+
+                          <div className="mt-4 flex min-w-0 items-center gap-2 text-sm text-zinc-300">
+                            <AppIcon icon={FolderOpenIcon} size={16} className="flex-none text-zinc-500" />
+                            <span className="truncate">Deploys from {rootLabel}</span>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
+                            <span>{formatTime(service.lastDeployedAt ?? service.updatedAt)}</span>
+                            <span>on</span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <AppIcon icon={GitBranchIcon} size={14} />
+                              {service.branch}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </article>
                 );
               })}
             </section>
           )}
         </div>
       </main>
-      <CreateProjectModal open={createProjectOpen} onClose={() => setCreateProjectOpen(false)} onCreate={createProject} />
       <CreateServiceModal open={createServiceOpen} onClose={() => setCreateServiceOpen(false)} onCreate={createService} />
+      <DeleteProjectModal
+        open={deleteProjectOpen}
+        projectName={project?.name ?? projectSlug}
+        busy={deletingProject}
+        onClose={() => setDeleteProjectOpen(false)}
+        onConfirm={() => void deleteProject()}
+      />
       {selectedService ? (
         <ServiceModal
           key={selectedService.id}
