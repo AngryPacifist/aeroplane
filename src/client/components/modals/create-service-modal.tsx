@@ -14,7 +14,8 @@ import {
   PencilEdit02Icon,
   Search01Icon,
   Settings01Icon,
-  WorkflowSquare07Icon
+  WorkflowSquare07Icon,
+  CloudServerIcon
 } from "@hugeicons/core-free-icons";
 import { FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -43,6 +44,10 @@ import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
 import type { ServiceFormPayload } from "./service-modal-types";
+import { ImportTypeStep } from "./import-type-step";
+import { DatabaseSelectStep } from "./database-select-step";
+import { DatabaseConfigureStep } from "./database-configure-step";
+import type { DatabaseType } from "./database-service-options";
 
 type ParsedEnvEntry = {
   key: string;
@@ -79,7 +84,10 @@ export function CreateServiceModal({
   onClose: () => void;
   onCreate: (payload: ServiceFormPayload) => Promise<void>;
 }) {
-  const [step, setStep] = useState<"repo" | "directory" | "configure">("repo");
+  const [step, setStep] = useState<"type" | "repo" | "directory" | "configure" | "database-select" | "database-configure">("type");
+  const [serviceType, setServiceType] = useState<"git" | "database" | null>(null);
+  const [selectedDbType, setSelectedDbType] = useState<DatabaseType>("postgres");
+
   const [form, setForm] = useState<ServiceFormPayload>({
     name: "",
     repoFullName: "",
@@ -95,6 +103,7 @@ export function CreateServiceModal({
   const [githubStatus, setGitHubStatus] = useState<null | GitHubStatus>(null);
   const [repoQuery, setRepoQuery] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [loadingRepos, setLoadingRepos] = useState(false);
@@ -122,14 +131,17 @@ export function CreateServiceModal({
   }, [repos]);
 
   const filteredRepos = useMemo(() => {
-    return repos.filter((repo) => ownerFilter === "all" || repo.fullName.startsWith(`${ownerFilter}/`));
+    return repos
+      .filter((repo) => ownerFilter === "all" || repo.fullName.startsWith(`${ownerFilter}/`))
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
   }, [ownerFilter, repos]);
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.fullName === form.repoFullName) ?? null, [repos, form.repoFullName]);
 
   useEffect(() => {
     if (!open) {
-      setStep("repo");
+      setStep("type");
+      setServiceType(null);
       setForm({
         name: "",
         repoFullName: "",
@@ -145,6 +157,7 @@ export function CreateServiceModal({
       setGitHubStatus(null);
       setRepoQuery("");
       setOwnerFilter("all");
+      setOwnerMenuOpen(false);
       setRepos([]);
       setBranches([]);
       setLoadingRepos(false);
@@ -356,13 +369,49 @@ export function CreateServiceModal({
     }
   }
 
+  async function handleDatabaseSubmit(payload: {
+    name: string;
+    repoFullName: string;
+    repoUrl: string;
+    branch: string;
+    internalPort: number;
+    env: Array<{ key: string; value: string }>;
+  }) {
+    setBusy(true);
+    setError("");
+    try {
+      await onCreate({
+        name: payload.name,
+        repoFullName: payload.repoFullName,
+        repoUrl: payload.repoUrl,
+        branch: payload.branch,
+        internalPort: payload.internalPort,
+        env: payload.env
+      });
+      onClose();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not create database service");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const currentDirectory = form.rootDir || "";
-  const stepIndex = step === "repo" ? 0 : step === "directory" ? 1 : 2;
-  const stepItems = [
-    { key: "repo", label: "Repository" },
-    { key: "directory", label: "Directory" },
-    { key: "configure", label: "Configure" }
-  ] as const;
+
+  const stepItems = serviceType === "database"
+    ? ([
+        { key: "database-select", label: "Database" },
+        { key: "database-configure", label: "Configure" }
+      ] as const)
+    : ([
+        { key: "repo", label: "Repository" },
+        { key: "directory", label: "Directory" },
+        { key: "configure", label: "Configure" }
+      ] as const);
+
+  const stepIndex = serviceType === "database"
+    ? step === "database-select" ? 0 : 1
+    : step === "repo" ? 0 : step === "directory" ? 1 : 2;
 
   function handleEnvPaste(text: string) {
     const entries = parseEnvText(text);
@@ -395,107 +444,229 @@ export function CreateServiceModal({
     setNewEnvOpen(false);
   }
 
+  const modalIcon =
+    step === "type"
+      ? PackageIcon
+      : step === "database-select"
+      ? CloudServerIcon
+      : step === "database-configure"
+      ? Settings01Icon
+      : step === "repo"
+      ? GithubIcon
+      : step === "directory"
+      ? FolderOpenIcon
+      : Settings01Icon;
+
+  const modalTitle =
+    step === "type"
+      ? "Create New Service"
+      : step === "database-select"
+      ? "Select Database Engine"
+      : step === "database-configure"
+      ? "Configure Database"
+      : step === "repo"
+      ? "Import Git Repository"
+      : step === "directory"
+      ? "Choose Root Directory"
+      : "Configure service";
+
+  const modalMeta =
+    step === "type"
+      ? "Choose service type"
+      : serviceType === "database"
+      ? step === "database-select"
+        ? "Step 1 of 2"
+        : "Step 2 of 2"
+      : step === "repo"
+      ? "Step 1 of 3"
+      : step === "directory"
+      ? "Step 2 of 3"
+      : "Step 3 of 3";
+
   return (
     <ModalShell
       open={open}
       onClose={onClose}
-      icon={step === "repo" ? GithubIcon : step === "directory" ? FolderOpenIcon : Settings01Icon}
-      title={step === "repo" ? "Import Git Repository" : step === "directory" ? "Choose Root Directory" : "Configure service"}
-      meta={step === "repo" ? "Step 1 of 3" : step === "directory" ? "Step 2 of 3" : "Step 3 of 3"}
-      width="max-w-5xl"
+      icon={modalIcon}
+      title={modalTitle}
+      meta={modalMeta}
+      width="max-w-2xl"
       bodyClassName="min-h-0 flex flex-1 flex-col overflow-hidden"
     >
-      <div className="mb-5 flex shrink-0 items-center gap-3">
-        {stepItems.map((item, index) => (
-          <div key={item.key} className="flex items-center gap-3">
-            <div className={`flex items-center gap-2 border px-3 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] ${index === stepIndex ? "border-[#4FB8B2]/40 bg-[#4FB8B2]/14 text-[#7fe3dd]" : index < stepIndex ? "border-zinc-600 bg-zinc-800 text-zinc-100" : "border-zinc-700 bg-zinc-900/85 text-zinc-300"}`}>
-              <span className={`grid h-5 w-5 place-items-center border text-[10px] ${index === stepIndex ? "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#7fe3dd]" : "border-zinc-700 text-zinc-400"}`}>{index + 1}</span>
-              {item.label}
+      {step !== "type" && (
+        <div className="mb-4 grid shrink-0 grid-cols-2 md:grid-cols-3 gap-3">
+          {stepItems.map((item, index) => (
+            <div
+              key={item.key}
+              className={`flex min-w-0 items-center gap-2 border px-2.5 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                index === stepIndex ? "border-[#4FB8B2]/40 bg-[#4FB8B2]/14 text-[#7fe3dd]" : index < stepIndex ? "border-zinc-600 bg-zinc-800 text-zinc-100" : "border-zinc-700 bg-zinc-900/85 text-zinc-300"
+              }`}
+            >
+              <span className={`grid h-4 w-4 place-items-center border text-[9px] ${index === stepIndex ? "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#7fe3dd]" : "border-zinc-700 text-zinc-400"}`}>{index + 1}</span>
+              <span className="truncate">{item.label}</span>
             </div>
-            {index < stepItems.length - 1 ? <div className="h-px w-6 bg-zinc-800" /> : null}
-          </div>
-        ))}
-      </div>
-      {step === "repo" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="space-y-4">
-          {connected === false ? (
-            <div className="space-y-3 border border-zinc-700 bg-zinc-900/85 p-4">
-              <div className="text-sm text-zinc-300">
-                {githubStatus?.installUrl ? (
-                  <>
-                    Install the GitHub App first, or enter <code>owner/repo</code> manually to continue.
-                  </>
-                ) : (
-                  <>
-                    GitHub is not connected yet. Configure a GitHub App or set <code>GITHUB_ACCESS_TOKEN</code> on the server.
-                  </>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <FormInput
-                  value={form.repoFullName}
-                  onChange={(event) => setForm((current) => ({ ...current, repoFullName: event.target.value, name: event.target.value.split("/").at(-1) || current.name }))}
-                  placeholder="owner/repo"
-                  disabled={busy}
-                />
-                <button type="button" className={shellButton("primary")} onClick={() => setStep("directory")} disabled={!form.repoFullName.trim()}>
-                  Continue
-                </button>
-              </div>
-            </div>
-          ) : connected === null ? (
-            <div className="border border-zinc-700 bg-zinc-900/85 px-4 py-4 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-300">Checking GitHub connection…</div>
-          ) : (
-            <>
-              <div className="grid gap-3 md:grid-cols-[260px_minmax(0,1fr)]">
-                <FormSelect value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} disabled={!owners.length}>
-                  {owners.length === 0 ? <option value="all">Loading accounts…</option> : null}
-                  {owners.map((owner) => (
-                    <option key={owner} value={owner}>
-                      {owner}
-                    </option>
-                  ))}
-                </FormSelect>
-                <div className="relative">
-                  <AppIcon icon={Search01Icon} size={16} className="pointer-events-none absolute left-3 top-3 text-zinc-500" />
-                  <FormInput value={repoQuery} onChange={(event) => setRepoQuery(event.target.value)} placeholder="Search repositories" className="pl-10" />
+          ))}
+        </div>
+      )}
+
+      {step === "type" ? (
+        <ImportTypeStep
+          onSelect={(type) => {
+            setServiceType(type);
+            if (type === "git") {
+              setStep("repo");
+            } else {
+              setStep("database-select");
+            }
+          }}
+        />
+      ) : step === "database-select" ? (
+        <DatabaseSelectStep
+          onSelect={(dbType) => {
+            setSelectedDbType(dbType);
+            setStep("database-configure");
+          }}
+          onBack={() => {
+            setServiceType(null);
+            setStep("type");
+          }}
+        />
+      ) : step === "database-configure" ? (
+        <DatabaseConfigureStep
+          dbType={selectedDbType}
+          onBack={() => setStep("database-select")}
+          onSubmit={handleDatabaseSubmit}
+          busy={busy}
+        />
+      ) : step === "repo" ? (
+        <div className="flex min-h-full flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="space-y-4">
+              {connected === false ? (
+                <div className="space-y-3 border border-zinc-700 bg-zinc-900/85 p-4">
+                  <div className="text-sm text-zinc-300">
+                    {githubStatus?.installUrl ? (
+                      <>
+                        Install the GitHub App first, or enter <code>owner/repo</code> manually to continue.
+                      </>
+                    ) : (
+                      <>
+                        GitHub is not connected yet. Configure a GitHub App or set <code>GITHUB_ACCESS_TOKEN</code> on the server.
+                      </>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <FormInput
+                      value={form.repoFullName}
+                      onChange={(event) => setForm((current) => ({ ...current, repoFullName: event.target.value, name: event.target.value.split("/").at(-1) || current.name }))}
+                      placeholder="owner/repo"
+                      disabled={busy}
+                    />
+                    <button type="button" className={shellButton("primary")} onClick={() => setStep("directory")} disabled={!form.repoFullName.trim()}>
+                      Continue
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              {repoError ? <div className="border border-rose-500/25 bg-rose-950/20 px-4 py-3 text-sm text-rose-200">GitHub is configured, but repo lookup failed: {repoError}</div> : null}
-
-              <div className="overflow-hidden border border-zinc-700 bg-zinc-900/85">
-                <div className="max-h-[460px] overflow-auto">
-                  {filteredRepos.length === 0 ? (
-                    <div className="px-4 py-5 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-300">
-                      {loadingRepos ? "Loading repositories..." : "No repositories found for this search yet."}
-                    </div>
-                  ) : (
-                    filteredRepos.map((repo) => (
-                      <div key={repo.id} className="flex items-center justify-between gap-4 border-b border-zinc-800 px-4 py-4 last:border-b-0">
-                        <div className="flex min-w-0 items-center gap-3">
-                          <div className="grid h-11 w-11 shrink-0 place-items-center border border-zinc-800 bg-zinc-900 text-zinc-200">
-                            <AppIcon icon={GithubIcon} size={18} />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate text-base font-medium text-zinc-100">{repo.name}</div>
-                            <div className="truncate font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
-                              {repo.fullName}
-                              <span className="ml-2">{formatRelativeTime(repo.updatedAt)}</span>
-                            </div>
-                          </div>
+              ) : connected === null ? (
+                <div className="border border-zinc-700 bg-zinc-900/85 px-4 py-4 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-300">Checking GitHub connection…</div>
+              ) : (
+                <>
+                  <div className="grid gap-2 md:grid-cols-[260px_minmax(0,1fr)]">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-between border border-zinc-700 bg-zinc-900 px-3 text-left text-sm text-zinc-100 disabled:opacity-60"
+                        onClick={() => setOwnerMenuOpen((current) => !current)}
+                        disabled={!owners.length}
+                      >
+                        <span className="truncate">{ownerFilter === "all" ? "Loading accounts..." : ownerFilter}</span>
+                        <AppIcon icon={ArrowLeft01Icon} size={16} className={ownerMenuOpen ? "rotate-90" : "-rotate-90"} />
+                      </button>
+                      {ownerMenuOpen ? (
+                        <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 max-h-64 overflow-auto border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+                          {owners.map((owner) => (
+                            <button
+                              key={owner}
+                              type="button"
+                              className="flex w-full items-center justify-between border-b border-zinc-800 px-3 py-3 text-left text-sm text-zinc-100 hover:bg-zinc-800"
+                              onClick={() => {
+                                setOwnerFilter(owner);
+                                setOwnerMenuOpen(false);
+                              }}
+                            >
+                              <span className="truncate">{owner}</span>
+                              {ownerFilter === owner ? <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7fe3dd]">Current</span> : null}
+                            </button>
+                          ))}
+                          {githubStatus?.installUrl ? (
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 px-3 py-3 text-left font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7fe3dd] hover:bg-[#4FB8B2]/10"
+                              onClick={() => {
+                                window.open(githubStatus.installUrl ?? "", "_blank", "noopener,noreferrer");
+                                setOwnerMenuOpen(false);
+                              }}
+                            >
+                              <AppIcon icon={GithubIcon} size={14} />
+                              Configure GitHub
+                            </button>
+                          ) : null}
                         </div>
-                        <button type="button" className={shellButton("secondary")} onClick={() => selectRepo(repo)}>
-                          Import
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </>
-          )}
+                      ) : null}
+                    </div>
+                    <div className="relative">
+                      <AppIcon icon={Search01Icon} size={16} className="pointer-events-none absolute left-3 top-3 text-zinc-500" />
+                      <FormInput value={repoQuery} onChange={(event) => setRepoQuery(event.target.value)} placeholder="Search repositories" className="pl-10" />
+                    </div>
+                  </div>
+
+                  {repoError ? <div className="border border-rose-500/25 bg-rose-950/20 px-4 py-3 text-sm text-rose-200">GitHub is configured, but repo lookup failed: {repoError}</div> : null}
+
+                  <div className="overflow-hidden border border-zinc-700 bg-zinc-900/85">
+                    <div className="max-h-[280px] overflow-auto">
+                      {filteredRepos.length === 0 ? (
+                        <div className="px-4 py-5 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-300">
+                          {loadingRepos ? "Loading repositories..." : "No repositories found for this search yet."}
+                        </div>
+                      ) : (
+                        filteredRepos.map((repo) => (
+                          <div key={repo.id} className="flex items-center justify-between gap-3 border-b border-zinc-800 px-3 py-2.5 last:border-b-0">
+                            <div className="flex min-w-0 items-center gap-2.5">
+                              <div className="grid h-8 w-8 shrink-0 place-items-center border border-zinc-800 bg-zinc-900 text-zinc-200">
+                                <AppIcon icon={GithubIcon} size={15} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-zinc-100">{repo.name}</div>
+                                <div className="truncate font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
+                                  {repo.fullName}
+                                  <span className="ml-2">{formatRelativeTime(repo.updatedAt)}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <button type="button" className={shellButton("secondary")} onClick={() => selectRepo(repo)}>
+                              Import
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 flex items-center justify-start gap-3 border-t border-zinc-800 pt-4">
+            <button
+              type="button"
+              className={shellButton("ghost")}
+              onClick={() => {
+                setServiceType(null);
+                setStep("type");
+              }}
+            >
+              <AppIcon icon={ArrowLeft01Icon} size={16} />
+              Back
+            </button>
           </div>
         </div>
       ) : step === "directory" ? (
@@ -696,7 +867,7 @@ export function CreateServiceModal({
             </button>
             <button type="submit" className={shellButton("primary")} disabled={busy}>
               <AppIcon icon={AddSquareIcon} size={16} />
-              {busy ? "Importing..." : "Import service"}
+              {busy ? "Deploying..." : "Deploy"}
             </button>
           </div>
         </form>
