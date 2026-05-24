@@ -129,7 +129,9 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
               Reference
             </span>
             <span className="text-zinc-500">→ resolves to:</span>
-            <span className="font-semibold text-zinc-300 select-all">{item.resolvedValue}</span>
+            <span className={`font-semibold text-zinc-300 ${hidden ? "select-none tracking-widest text-zinc-500/80 font-sans" : "select-all"}`}>
+              {hidden ? "••••••••••••••••" : item.resolvedValue}
+            </span>
           </div>
         )}
       </div>
@@ -210,7 +212,9 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
             Reference
           </span>
           <span className="text-zinc-500">→ resolves to:</span>
-          <span className="font-semibold text-zinc-300 select-all">{item.resolvedValue}</span>
+          <span className={`font-semibold text-zinc-300 ${hidden ? "select-none tracking-widest text-zinc-500/80 font-sans" : "select-all"}`}>
+            {hidden ? "••••••••••••••••" : item.resolvedValue}
+          </span>
         </div>
       )}
     </div>
