@@ -1,6 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Globe02Icon } from "@hugeicons/core-free-icons";
-import type { ReactNode } from "react";
+import { ReactNode, forwardRef } from "react";
 import type { Framework } from "../../api";
 
 export function AppIcon({ icon, className = "", size = 18 }: { icon: unknown; className?: string; size?: number }) {
@@ -63,14 +63,17 @@ export function FieldLabel({ children }: { children: ReactNode }) {
   return <span className="mb-2 block font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-400">{children}</span>;
 }
 
-export function FormInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={`h-11 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-[#4FB8B2]/60 ${props.className ?? ""}`}
-    />
-  );
-}
+export const FormInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+  (props, ref) => {
+    return (
+      <input
+        {...props}
+        ref={ref}
+        className={`h-11 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-500 focus:border-[#4FB8B2]/60 ${props.className ?? ""}`}
+      />
+    );
+  }
+);
 
 export function FormSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
