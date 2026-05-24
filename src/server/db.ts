@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS projects (
   static_output TEXT,
   internal_port INTEGER NOT NULL,
   host_port INTEGER NOT NULL UNIQUE,
+  active_port INTEGER,
   status TEXT NOT NULL,
   last_deployed_at TEXT,
   created_at TEXT NOT NULL,
@@ -109,6 +110,10 @@ if (!hasColumn("projects", "repo_full_name")) {
 
 if (!hasColumn("projects", "root_dir")) {
   sqlite.exec("ALTER TABLE projects ADD COLUMN root_dir TEXT");
+}
+
+if (!hasColumn("projects", "active_port")) {
+  sqlite.exec("ALTER TABLE projects ADD COLUMN active_port INTEGER");
 }
 
 sqlite.exec(`
