@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   AddSquareIcon,
   ArrowLeft01Icon,
@@ -34,8 +34,21 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProject, setSelectedProject] = useState<RailwayProject | null>(null);
   const [importedSlug, setImportedSlug] = useState("");
+  const [rememberToken, setRememberToken] = useState(() => {
+    const saved = localStorage.getItem("railway_remember_token");
+    return saved !== "false";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      const savedToken = localStorage.getItem("railway_api_token");
+      if (savedToken) {
+        setApiToken(savedToken);
+      }
+    }
+  }, [open]);
 
   const filteredProjects = projects.filter(
     (p) =>
@@ -49,6 +62,12 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
     setError("");
     try {
       const data = await api.railwayProjects(apiToken.trim());
+      localStorage.setItem("railway_remember_token", rememberToken ? "true" : "false");
+      if (rememberToken) {
+        localStorage.setItem("railway_api_token", apiToken.trim());
+      } else {
+        localStorage.removeItem("railway_api_token");
+      }
       setProjects(data.projects);
       setStep("select");
     } catch (err) {
@@ -138,8 +157,21 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
               onChange={(e) => setApiToken(e.target.value)}
               placeholder="rg_pat_..."
               disabled={busy}
+              autoComplete="new-password"
               required
             />
+            <div className="flex items-center gap-2 mt-3 select-none">
+              <input
+                type="checkbox"
+                id="remember-token"
+                checked={rememberToken}
+                onChange={(e) => setRememberToken(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
+              />
+              <label htmlFor="remember-token" className="text-xs text-zinc-400 cursor-pointer font-mono uppercase tracking-wider">
+                Remember my Railway token
+              </label>
+            </div>
           </div>
 
           {error && (
