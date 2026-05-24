@@ -76,6 +76,14 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
             node {
               id
               name
+              repoTriggers {
+                edges {
+                  node {
+                    repository
+                    branch
+                  }
+                }
+              }
             }
           }
         }
@@ -84,6 +92,17 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
             node {
               id
               name
+              serviceInstances {
+                edges {
+                  node {
+                    serviceId
+                    source {
+                      repo
+                      image
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -99,7 +118,23 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
 
   const servicesEdges = rProject.services?.edges ?? [];
   const environmentEdges = rProject.environments?.edges ?? [];
-  const firstEnvId = environmentEdges[0]?.node?.id;
+  const firstEnvNode = environmentEdges[0]?.node;
+  const firstEnvId = firstEnvNode?.id;
+
+  // Build serviceSourceMap from serviceInstances of the first environment
+  const serviceSourceMap = new Map<string, { repo?: string; image?: string }>();
+  if (firstEnvNode) {
+    const instancesEdges = firstEnvNode.serviceInstances?.edges ?? [];
+    for (const edge of instancesEdges) {
+      const node = edge?.node;
+      if (node && node.serviceId) {
+        serviceSourceMap.set(node.serviceId, {
+          repo: node.source?.repo || undefined,
+          image: node.source?.image || undefined
+        });
+      }
+    }
+  }
 
   const timestamp = nowIso();
   const projectGroupId = nanoid(10);
@@ -127,36 +162,34 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
     const serviceName = sNode.name;
     const serviceId = sNode.id;
 
-    // Fetch individual service details (repo, branch, etc.)
-    const serviceQuery = `
-      query GetServiceSource($id: String!) {
-        service(id: $id) {
-          id
-          name
-          repo
-          branch
-        }
-      }
-    `;
-
     let repoUrl = "";
     let repoFullName = "";
     let branch = "main";
     let internalPort = 8080;
     let isDatabase = false;
 
-    try {
-      const sDetailData = await fetchRailwayGraphQL(token, serviceQuery, { id: serviceId });
-      const sDetail = sDetailData?.service;
-      if (sDetail) {
-        branch = sDetail.branch || "main";
-        if (sDetail.repo) {
-          repoFullName = sDetail.repo.replace("https://github.com/", "").replace(/\.git$/, "");
-          repoUrl = sDetail.repo.startsWith("http") ? sDetail.repo : `https://github.com/${sDetail.repo}`;
-        }
+    // 1. Resolve from repoTriggers if available
+    const triggersEdges = sNode.repoTriggers?.edges ?? [];
+    const firstTrigger = triggersEdges[0]?.node;
+    if (firstTrigger) {
+      branch = firstTrigger.branch || "main";
+      if (firstTrigger.repository) {
+        repoFullName = firstTrigger.repository.replace("https://github.com/", "").replace(/\.git$/, "");
+        repoUrl = firstTrigger.repository.startsWith("http") ? firstTrigger.repository : `https://github.com/${firstTrigger.repository}`;
       }
-    } catch {
-      // Gracefully fall back if repository query fails
+    }
+
+    // 2. Resolve from serviceSourceMap (fallback for repo, or container image details)
+    const sourceInfo = serviceSourceMap.get(serviceId);
+    if (sourceInfo) {
+      if (sourceInfo.repo && !repoUrl) {
+        repoFullName = sourceInfo.repo.replace("https://github.com/", "").replace(/\.git$/, "");
+        repoUrl = sourceInfo.repo.startsWith("http") ? sourceInfo.repo : `https://github.com/${sourceInfo.repo}`;
+      } else if (sourceInfo.image) {
+        isDatabase = true;
+        repoUrl = "database";
+        repoFullName = `database:${sourceInfo.image.split(":")[0]}`;
+      }
     }
 
     // Auto-detect database types from service name
