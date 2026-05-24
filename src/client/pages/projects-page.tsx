@@ -5,6 +5,7 @@ import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api
 import { AppIcon, FrameworkMark } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
+import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 
 function ServiceCluster({ project }: { project: ProjectCard }) {
   const previewServices = project.services.slice(0, 7);
@@ -42,6 +43,7 @@ export function ProjectsPage() {
   const [tools, setTools] = useState<ToolCheck[]>([]);
   const [githubStatus, setGitHubStatus] = useState<null | GitHubStatus>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [railwayImportOpen, setRailwayImportOpen] = useState(false);
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
   const [error, setError] = useState("");
 
@@ -99,6 +101,14 @@ export function ProjectsPage() {
                   </div>
                 ))}
               </div>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 border border-[#E93D82]/50 bg-[#E93D82]/10 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#E93D82] transition-colors hover:bg-[#E93D82]/20"
+                onClick={() => setRailwayImportOpen(true)}
+              >
+                <AppIcon icon={AddSquareIcon} size={16} />
+                Import from Railway
+              </button>
               <button
                 type="button"
                 className="inline-flex items-center justify-center gap-2 border border-[#4FB8B2]/50 bg-[#4FB8B2]/15 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#4FB8B2] transition-colors hover:bg-[#4FB8B2]/25"
@@ -176,6 +186,7 @@ export function ProjectsPage() {
         </div>
       </main>
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
+      <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
       <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
     </>
   );
