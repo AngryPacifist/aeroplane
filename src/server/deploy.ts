@@ -182,6 +182,57 @@ async function ensureBuildkitAvailable(deploymentId: string) {
   throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
 }
 
+function getEphemeralFreePort(): Promise<number> {
+  return new Promise<number>((resolvePromise, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address && typeof address === "object") {
+        const port = address.port;
+        server.close(() => resolvePromise(port));
+      } else {
+        reject(new Error("Could not allocate ephemeral port"));
+      }
+    });
+  });
+}
+
+function probePort(port: number, timeoutMs = 20000): Promise<void> {
+  const startTime = Date.now();
+  return new Promise<void>((resolvePromise, reject) => {
+    function next() {
+      if (Date.now() - startTime > timeoutMs) {
+        reject(new Error(`TCP probe timed out on port ${port} after ${timeoutMs}ms`));
+        return;
+      }
+
+      const socket = new net.Socket();
+      socket.setTimeout(1000);
+      
+      socket.once("connect", () => {
+        socket.destroy();
+        resolvePromise();
+      });
+
+      socket.once("timeout", () => {
+        socket.destroy();
+        setTimeout(next, 200);
+      });
+
+      socket.once("error", () => {
+        socket.destroy();
+        setTimeout(next, 200);
+      });
+
+      socket.connect(port, "127.0.0.1");
+    }
+
+    next();
+  });
+}
+
 function escapeDockerEnvValue(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
@@ -652,11 +703,11 @@ async function runDeployment(deployment: Deployment, service: Service) {
       );
     }
 
-    await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
-      appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
-    });
-
     if (isStaticService) {
+      await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
+        appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
+      });
+
       await exportStaticSiteFromImage(deployment, service, imageTag, hasCustomCommands);
 
       const deployedAt = now();
@@ -673,13 +724,57 @@ async function runDeployment(deployment: Deployment, service: Service) {
       return;
     }
 
-    const dockerArgs = ["run", "-d", "--restart", "unless-stopped", "--name", containerName, "-p", `127.0.0.1:${service.hostPort}:${service.internalPort}`];
+    // Allocate temporary ephemeral port for zero-downtime hot-swap
+    const tempPort = await getEphemeralFreePort();
+    const tempContainerName = `${containerName}-${deployment.id}`;
+    appendDeploymentLog(deployment.id, `Allocated ephemeral port ${tempPort} for zero-downtime container rollout.`);
+
+    const dockerArgs = [
+      "run",
+      "-d",
+      "--restart",
+      "unless-stopped",
+      "--name",
+      tempContainerName,
+      "-p",
+      `127.0.0.1:${tempPort}:${service.internalPort}`
+    ];
     for (const [key, value] of Object.entries({ ...env, PORT: String(service.internalPort) })) {
       dockerArgs.push("--env", `${key}=${value}`);
     }
     dockerArgs.push(imageTag);
 
+    appendDeploymentLog(deployment.id, `Starting new container ${tempContainerName} mapping 127.0.0.1:${tempPort} to internal ${service.internalPort}...`);
     await runCommand("docker", dockerArgs, deployment.id, { redact: secrets });
+
+    appendDeploymentLog(deployment.id, `Probing port ${tempPort} for startup TCP health check...`);
+    try {
+      await probePort(tempPort);
+      appendDeploymentLog(deployment.id, `Startup TCP probe succeeded. Container is healthy.`);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      appendDeploymentLog(deployment.id, `Startup TCP probe failed: ${errMsg}. Cleaning up temporary container...`, "stderr");
+      await runCommand("docker", ["rm", "-f", tempContainerName], deployment.id).catch(() => {});
+      throw new Error(`Health check failed: ${errMsg}`);
+    }
+
+    // Update active port in database to route incoming requests to tempPort
+    db.update(services).set({ activePort: tempPort }).where(eq(services.id, service.id)).run();
+
+    appendDeploymentLog(deployment.id, "Hot-swapping traffic by reloading Caddy configuration...");
+    const caddy = await writeAndReloadCaddy();
+    appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config hot-reloaded successfully." : `Caddy reload failed: ${caddy.detail}`);
+
+    appendDeploymentLog(deployment.id, "Waiting 300ms for active connections to drain gracefully...");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+
+    appendDeploymentLog(deployment.id, `Stopping and removing old container ${containerName} if it exists...`);
+    await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
+      // Ignore if no previous container was running
+    });
+
+    appendDeploymentLog(deployment.id, `Renaming new container ${tempContainerName} to stable name ${containerName}...`);
+    await runCommand("docker", ["rename", tempContainerName, containerName], deployment.id);
 
     const deployedAt = now();
     supersedeRunningDeployments(service.id);
@@ -689,9 +784,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       .where(eq(services.id, service.id))
       .run();
 
-    const caddy = await writeAndReloadCaddy();
-    appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
-    appendDeploymentLog(deployment.id, `Deployment is running on 127.0.0.1:${service.hostPort}.`);
+    appendDeploymentLog(deployment.id, `Deployment successfully running on 127.0.0.1:${service.hostPort}.`);
   } catch (error) {
     if (error instanceof DeploymentAbortedError) {
       abortRequests.delete(deployment.id);
