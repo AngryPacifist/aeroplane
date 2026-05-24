@@ -77,6 +77,7 @@ export type EnvVar = {
   key: string;
   hasValue: boolean;
   value?: string;
+  resolvedValue?: string;
   createdAt: string;
   updatedAt: string;
 };
