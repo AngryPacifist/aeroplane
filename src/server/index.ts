@@ -320,6 +320,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
     staticOutput: input.staticOutput ?? null,
     internalPort: input.internalPort,
     hostPort: allocateHostPort(),
+    activePort: null,
     status: "idle",
     lastDeployedAt: null,
     createdAt: timestamp,
