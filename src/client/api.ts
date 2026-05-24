@@ -181,5 +181,15 @@ export const api = {
   addDomain: (serviceId: string, body: unknown) =>
     request(`/api/services/${serviceId}/domains`, { method: "POST", body: JSON.stringify(body) }),
   deleteDomain: (serviceId: string, domainId: string) =>
-    request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" })
+    request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" }),
+  railwayProjects: (apiToken: string) =>
+    request<{ projects: Array<{ id: string; name: string; description: string; serviceCount: number }> }>(
+      "/api/integrations/railway/projects",
+      { method: "POST", body: JSON.stringify({ apiToken }) }
+    ),
+  railwayImport: (apiToken: string, projectId: string) =>
+    request<{ ok: boolean; projectSlug: string }>("/api/integrations/railway/import", {
+      method: "POST",
+      body: JSON.stringify({ apiToken, projectId })
+    })
 };
