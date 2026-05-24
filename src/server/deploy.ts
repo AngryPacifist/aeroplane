@@ -10,6 +10,7 @@ import { publishDeploymentLog } from "./logBus.js";
 import { deploymentLogs, deployments, envVars, services, type Deployment, type Service } from "./schema.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { getCloneTokenForRepo } from "./github-connect.js";
+import { resolveServiceEnv } from "./variable-resolver.js";
 
 type RunOptions = {
   cwd?: string;
@@ -328,8 +329,7 @@ function defaultInstallCommand(sourceDir: string, packageManager: string) {
 }
 
 function getEnvForService(serviceId: string) {
-  const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
-  return Object.fromEntries(rows.map((row) => [row.key, normalizeEnvValue(row.value)]));
+  return resolveServiceEnv(serviceId);
 }
 
 function getLastLiveServiceStatus(serviceId: string): "active" | "idle" {
