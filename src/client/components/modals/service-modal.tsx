@@ -29,6 +29,7 @@ import {
   type ServiceOverview
 } from "../../api";
 import { ModalShell } from "./modal-shell";
+import { AutocompleteInput } from "../ui/autocomplete-input";
 import {
   AppIcon,
   BrowserIconFallback,
@@ -174,6 +175,7 @@ export function ServiceModal({
   const [envForm, setEnvForm] = useState({ key: "", value: "" });
   const [envSearch, setEnvSearch] = useState("");
   const [newEnvOpen, setNewEnvOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<Array<{ key: string; label: string }>>([]);
   const [domainForm, setDomainForm] = useState({ hostname: "" });
   const [settings, setSettings] = useState({
     name: "",
@@ -204,9 +206,13 @@ export function ServiceModal({
 
   const loadOverview = useCallback(async () => {
     try {
-      const result = await api.serviceOverview(serviceId);
+      const [result, suggs] = await Promise.all([
+        api.serviceOverview(serviceId),
+        api.suggestionKeys(serviceId).catch(() => ({ suggestions: [] }))
+      ]);
       startTransition(() => {
         setOverview(result);
+        setSuggestions(suggs.suggestions);
         setActiveDeploymentId((current) => current ?? result.deployments[0]?.id ?? null);
         setSettings({
           name: result.service.name,
@@ -685,11 +691,12 @@ export function ServiceModal({
                           </div>
                           <div>
                             <FieldLabel>Value</FieldLabel>
-                          <FormInput
+                          <AutocompleteInput
                             type="text"
                             value={envForm.value}
-                            onChange={(event) => setEnvForm({ ...envForm, value: event.target.value })}
+                            onChange={(val) => setEnvForm({ ...envForm, value: val })}
                             onPaste={handleEnvPaste}
+                            suggestions={suggestions}
                             placeholder="VALUE"
                             autoComplete="off"
                             required
@@ -716,6 +723,7 @@ export function ServiceModal({
                           key={item.id}
                           item={item}
                           busy={busy === "env"}
+                          suggestions={suggestions}
                           onSave={async (key, value) => {
                             await doAction("env", async () => {
                               if (key !== item.key) {
