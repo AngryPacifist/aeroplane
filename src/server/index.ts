@@ -13,6 +13,7 @@ import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
+import { resolveServiceEnv } from "./variable-resolver.js";
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
 import { branchFromGitRef, verifyGitHubSignature } from "./github.js";
 import { subscribeToDeploymentLogs } from "./logBus.js";
@@ -571,6 +572,8 @@ app.get("/api/services/:serviceId/overview", async (c) => {
     .limit(30)
     .all();
 
+  const resolvedEnv = resolveServiceEnv(service.id);
+
   const serviceEnv = db
     .select()
     .from(envVars)
@@ -582,6 +585,7 @@ app.get("/api/services/:serviceId/overview", async (c) => {
       key: row.key,
       hasValue: row.value.length > 0,
       value: row.value,
+      resolvedValue: resolvedEnv[row.key] ?? row.value,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt
     }));
