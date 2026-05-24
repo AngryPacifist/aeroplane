@@ -613,6 +613,71 @@ app.get("/api/services/:serviceId/overview", async (c) => {
   });
 });
 
+app.get("/api/services/:serviceId/suggestion-keys", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service) {
+    return jsonError("Service not found", 404);
+  }
+
+  const groupServices = db
+    .select()
+    .from(services)
+    .where(eq(services.projectId, service.projectId))
+    .all();
+
+  const serviceIds = groupServices.map((s) => s.id);
+  const allEnvs = serviceIds.length > 0
+    ? db.select().from(envVars).where(inArray(envVars.serviceId, serviceIds)).all()
+    : [];
+
+  const envsByServiceId = new Map<string, string[]>();
+  for (const sId of serviceIds) {
+    envsByServiceId.set(sId, []);
+  }
+  for (const row of allEnvs) {
+    envsByServiceId.get(row.serviceId)?.push(row.key);
+  }
+
+  const suggestions: Array<{ key: string; label: string }> = [];
+
+  const properties = ["hostPort", "activePort", "internalPort", "name", "slug", "status"];
+  for (const prop of properties) {
+    suggestions.push({
+      key: prop,
+      label: `Local service ${prop}`
+    });
+  }
+
+  const localEnvs = envsByServiceId.get(service.id) || [];
+  for (const key of localEnvs) {
+    suggestions.push({
+      key,
+      label: "Local environment variable"
+    });
+  }
+
+  for (const s of groupServices) {
+    if (s.id === service.id) continue;
+    
+    for (const prop of properties) {
+      suggestions.push({
+        key: `${s.slug}.${prop}`,
+        label: `Service ${s.name} ${prop}`
+      });
+    }
+
+    const sEnvs = envsByServiceId.get(s.id) || [];
+    for (const key of sEnvs) {
+      suggestions.push({
+        key: `${s.slug}.${key}`,
+        label: `Service ${s.name} variable`
+      });
+    }
+  }
+
+  return c.json({ suggestions });
+});
+
 app.patch("/api/services/:serviceId", async (c) => {
   const service = getServiceById(c.req.param("serviceId"));
   if (!service) {
