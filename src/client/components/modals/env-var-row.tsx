@@ -10,6 +10,7 @@ import {
   Cancel01Icon
 } from "@hugeicons/core-free-icons";
 import { AppIcon, FormInput, shellButton } from "../ui/primitives";
+import { AutocompleteInput } from "../ui/autocomplete-input";
 import type { EnvVar } from "../../api";
 
 interface EnvVarRowProps {
@@ -17,9 +18,10 @@ interface EnvVarRowProps {
   onSave: (key: string, value: string) => Promise<void>;
   onDelete: () => Promise<void>;
   busy: boolean;
+  suggestions: Array<{ key: string; label: string }>;
 }
 
-export function EnvVarRow({ item, onSave, onDelete, busy }: EnvVarRowProps) {
+export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarRowProps) {
   const [editing, setEditing] = useState(false);
   const [hidden, setHidden] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -75,10 +77,11 @@ export function EnvVarRow({ item, onSave, onDelete, busy }: EnvVarRowProps) {
             />
           </div>
           <div className="relative flex items-center">
-            <FormInput
+            <AutocompleteInput
               type={hidden ? "password" : "text"}
               value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
+              onChange={(val) => setEditValue(val)}
+              suggestions={suggestions}
               placeholder="VALUE"
               autoComplete="off"
               required
