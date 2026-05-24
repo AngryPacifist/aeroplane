@@ -686,12 +686,12 @@ export function ServiceModal({
                           <div>
                             <FieldLabel>Value</FieldLabel>
                           <FormInput
-                            type="password"
+                            type="text"
                             value={envForm.value}
                             onChange={(event) => setEnvForm({ ...envForm, value: event.target.value })}
                             onPaste={handleEnvPaste}
                             placeholder="VALUE"
-                            autoComplete="new-password"
+                            autoComplete="off"
                             required
                           />
                           </div>
