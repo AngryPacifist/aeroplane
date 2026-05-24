@@ -14,6 +14,7 @@ import { abortDeployment, allocateHostPort, containerNameForService, enqueueDepl
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
+import { getRailwayProjects, importRailwayProject } from "./railway-importer.js";
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
 import { branchFromGitRef, verifyGitHubSignature } from "./github.js";
 import { subscribeToDeploymentLogs } from "./logBus.js";
@@ -1012,6 +1013,37 @@ app.post("/api/github/app/webhook", async (c) => {
 
   const queued = matchingServices.map((service) => enqueueDeployment(service.id, { trigger: "github", commitSha: payload.after }));
   return c.json({ ok: true, queued: queued.map((deployment) => deployment.id) });
+});
+
+app.post("/api/integrations/railway/projects", async (c) => {
+  try {
+    const body = await c.req.json();
+    const token = body?.apiToken;
+    if (!token) {
+      return jsonError("API Token is required");
+    }
+    const projects = await getRailwayProjects(token);
+    return c.json({ projects });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Failed to load Railway projects";
+    return jsonError(msg);
+  }
+});
+
+app.post("/api/integrations/railway/import", async (c) => {
+  try {
+    const body = await c.req.json();
+    const token = body?.apiToken;
+    const projectId = body?.projectId;
+    if (!token || !projectId) {
+      return jsonError("API Token and Project ID are required");
+    }
+    const result = await importRailwayProject(token, projectId);
+    return c.json({ ok: true, projectSlug: result.projectSlug });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Failed to import Railway project";
+    return jsonError(msg);
+  }
 });
 
 app.get("/api/search", (c) => {
