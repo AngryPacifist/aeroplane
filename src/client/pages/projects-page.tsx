@@ -10,9 +10,10 @@ import { ServiceCluster } from "../features/projects/service-cluster";
 import { SystemHealthPill } from "../features/projects/system-health-pill";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import { SystemSettingsModal } from "../components/modals/system-settings-modal";
+import type { SystemSettingsTab } from "../components/modals/system-settings-types";
 import { usePageTitle } from "../lib/page-title";
 
-export function ProjectsPage() {
+export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab }) {
   const navigate = useNavigate();
   usePageTitle("Projects");
 
@@ -22,8 +23,9 @@ export function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [railwayImportOpen, setRailwayImportOpen] = useState(false);
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState("");
+  const settingsOpen = Boolean(settingsTab);
+  const activeSettingsTab = settingsTab ?? "root-domain";
 
   const loadProjects = useCallback(async () => {
     const [projectData, systemData, githubData] = await Promise.all([api.projects(), api.system(), api.githubStatus().catch(() => null)]);
@@ -44,6 +46,18 @@ export function ProjectsPage() {
     const result = await api.createProject(payload);
     await loadProjects();
     void navigate({ to: "/$projectSlug", params: { projectSlug: result.project.slug } });
+  }
+
+  function openSystemSettings(tab: SystemSettingsTab = "root-domain") {
+    void navigate({ to: "/", search: { settings: tab } });
+  }
+
+  function closeSystemSettings() {
+    void navigate({ to: "/", search: {} });
+  }
+
+  function changeSystemSettingsTab(tab: SystemSettingsTab) {
+    void navigate({ to: "/", search: { settings: tab } });
   }
 
   return (
@@ -96,7 +110,7 @@ export function ProjectsPage() {
                 className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
                 title="System Settings"
                 aria-label="System Settings"
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => openSystemSettings()}
               >
                 <AppIcon icon={Settings01Icon} size={15} />
               </button>
@@ -171,7 +185,7 @@ export function ProjectsPage() {
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
       <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
       <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
-      <SystemSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SystemSettingsModal activeTab={activeSettingsTab} onTabChange={changeSystemSettingsTab} open={settingsOpen} onClose={closeSystemSettings} />
     </>
   );
 }
