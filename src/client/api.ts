@@ -102,6 +102,7 @@ export type ServiceOverview = {
   deployments: Deployment[];
   env: EnvVar[];
   domains: Domain[];
+  publicIp?: string;
 };
 
 export type GitHubRepo = {
