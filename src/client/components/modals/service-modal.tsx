@@ -15,7 +15,9 @@ import {
   Search01Icon,
   Settings01Icon,
   WorkflowSquare07Icon,
-  CloudServerIcon
+  CloudServerIcon,
+  CopyIcon,
+  CopyCheckIcon
 } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import { ClipboardEvent, FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -177,6 +179,8 @@ export function ServiceModal({
   const [newEnvOpen, setNewEnvOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<Array<{ key: string; label: string }>>([]);
   const [domainForm, setDomainForm] = useState({ hostname: "" });
+  const [expandedDomainId, setExpandedDomainId] = useState<string | null>(null);
+  const [copiedIpDomainId, setCopiedIpDomainId] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     name: "",
     repoFullName: "",
@@ -745,7 +749,7 @@ export function ServiceModal({
               ) : null}
 
               {selectedTab === "domains" ? (
-                <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+                <div className="grid gap-4 lg:grid-cols-2">
                   <form
                     className="border border-zinc-700 bg-zinc-900/88 p-5"
                     onSubmit={(event) => {
@@ -769,20 +773,136 @@ export function ServiceModal({
                     </div>
                   </form>
                   <div className="space-y-3">
-                    {domains.map((domain) => (
-                      <div key={domain.id} className="flex items-center justify-between border border-zinc-700 bg-zinc-900/88 px-4 py-4">
-                        <div>
-                          <div className="font-medium text-zinc-100">{domain.hostname}</div>
-                          <div className="text-sm text-zinc-400">{domain.hostname.endsWith(".localhost") ? "Local route through Caddy" : "Public hostname"}</div>
+                    {domains.map((domain) => {
+                      const isLocal = domain.hostname.endsWith(".localhost") || domain.hostname === "localhost" || domain.hostname === "127.0.0.1";
+                      const isExpanded = expandedDomainId === domain.id;
+                      
+                      // DNS instructions parsing
+                      const parts = domain.hostname.split(".");
+                      const isSub = parts.length > 2 && parts[parts.length - 1] !== "localhost";
+                      const hostName = isSub ? parts.slice(0, -2).join(".") : "@";
+                      const targetIp = overview?.publicIp ?? "127.0.0.1";
+                      const isCopied = copiedIpDomainId === domain.id;
+
+                      const handleCopyIp = async (e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        try {
+                          await navigator.clipboard.writeText(targetIp);
+                          setCopiedIpDomainId(domain.id);
+                          setTimeout(() => setCopiedIpDomainId(null), 1500);
+                        } catch (err) {
+                          console.error("Failed to copy IP:", err);
+                        }
+                      };
+
+                      return (
+                        <div 
+                          key={domain.id} 
+                          className={`border border-zinc-700 bg-zinc-900/88 transition-all duration-200 overflow-hidden ${
+                            isLocal ? "" : "hover:border-zinc-500 cursor-pointer"
+                          }`}
+                          onClick={() => {
+                            if (!isLocal) {
+                              setExpandedDomainId(isExpanded ? null : domain.id);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center justify-between px-5 py-4 select-none">
+                            <div>
+                              <div className="font-semibold font-mono text-sm text-zinc-100 flex items-center gap-2">
+                                <AppIcon icon={Globe02Icon} size={15} className="text-[#4FB8B2]" />
+                                {domain.hostname}
+                              </div>
+                              <div className="text-[10px] text-zinc-400 font-mono mt-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                                <span>{isLocal ? "⚡ Local loopback DNS" : "🌐 Public custom domain"}</span>
+                                {!isLocal && (
+                                  <span className="text-[9px] text-[#4FB8B2]/80 border border-[#4FB8B2]/30 px-1 py-0.2">
+                                    {isExpanded ? "Click to collapse" : "Click to configure"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <StatusPill status={domain.status} />
+                              <button 
+                                type="button" 
+                                className={shellButton("ghost")} 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void doAction("domain", async () => void api.deleteDomain(serviceId, domain.id));
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Expandable DNS panel */}
+                          {!isLocal && isExpanded && (
+                            <div className="border-t border-zinc-800 bg-zinc-950/45 p-5 space-y-4 font-sans" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex flex-col gap-1.5">
+                                <h4 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300">
+                                  {domain.status === "active" 
+                                    ? "✅ DNS Configured Correctly" 
+                                    : "⚠️ DNS Configuration Required"}
+                                </h4>
+                                <p className="text-xs text-zinc-400 leading-relaxed">
+                                  To route public internet traffic to your self-hosted service, configure an **A Record** at your domain registrar (Cloudflare, GoDaddy, Namecheap, etc.) using these details:
+                                </p>
+                              </div>
+
+                              <div className="border border-zinc-800 overflow-hidden font-mono text-xs rounded bg-zinc-900/10">
+                                <div className="grid grid-cols-[80px_100px_1fr_auto] bg-zinc-900/60 border-b border-zinc-800 px-4 py-2 text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">
+                                  <div>Type</div>
+                                  <div>Host</div>
+                                  <div>Points To</div>
+                                  <div className="text-right">Status</div>
+                                </div>
+                                <div className="grid grid-cols-[80px_100px_1fr_auto] items-center px-4 py-3 text-zinc-300">
+                                  <div className="font-semibold text-emerald-400">A</div>
+                                  <div className="bg-zinc-900/60 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px] w-fit font-bold">{hostName}</div>
+                                  <div className="flex items-center gap-2 truncate font-semibold text-zinc-100 select-all pr-4">
+                                    {targetIp}
+                                    <button 
+                                      type="button" 
+                                      onClick={handleCopyIp}
+                                      className={`text-zinc-500 hover:text-zinc-300 transition-colors p-0.5`}
+                                      title={isCopied ? "Copied!" : "Copy IP Address"}
+                                    >
+                                      <AppIcon icon={isCopied ? CopyCheckIcon : CopyIcon} size={13} />
+                                    </button>
+                                  </div>
+                                  <div className="flex items-center justify-end text-right font-semibold text-[11px]">
+                                    {domain.status === "active" ? (
+                                      <span className="text-emerald-400">✓ Active</span>
+                                    ) : (
+                                      <span className="text-amber-500 animate-pulse">⚡ Pending</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-4 border-t border-zinc-800/80 pt-4 mt-2 sm:flex-row sm:items-center sm:justify-between">
+                                <span className="text-[10px] text-zinc-500 font-mono leading-relaxed max-w-sm">
+                                  {domain.status === "active" 
+                                    ? "Perfect! Caddy reverse-proxy SSL/TLS certificates will automatically renew natively." 
+                                    : "DNS propagation can take a few minutes. Click verify to check again."}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 px-3.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] transition shrink-0"
+                                  onClick={async () => {
+                                    await loadOverview();
+                                  }}
+                                >
+                                  🔄 Refresh & Verify
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <StatusPill status={domain.status} />
-                          <button type="button" className={shellButton("ghost")} onClick={() => void doAction("domain", async () => void api.deleteDomain(serviceId, domain.id))}>
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
