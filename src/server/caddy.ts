@@ -23,6 +23,15 @@ function staticSiteDirForService(serviceId: string) {
   return resolve(config.dataDir, "static-sites", serviceId);
 }
 
+function controlPlaneBlock() {
+  if (!config.controlPlaneHostname) return null;
+
+  return `${caddyAddress(config.controlPlaneHostname)} {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:${config.port}
+}`;
+}
+
 export function renderCaddyfile() {
   const domainMappings = db
     .select({
@@ -57,10 +66,15 @@ export function renderCaddyfile() {
     });
 
   const blocks: string[] = [];
+  const controlPlane = controlPlaneBlock();
+  if (controlPlane) {
+    blocks.push(controlPlane);
+  }
 
   for (const row of domainMappings) {
     const isDatabase = row.repoUrl === "database" || (row.repoFullName?.startsWith("database:") ?? false);
     if (isDatabase) continue;
+    if (config.controlPlaneHostname && row.hostname === config.controlPlaneHostname) continue;
 
     if (row.staticOutput) {
       blocks.push(`${caddyAddress(row.hostname)} {
