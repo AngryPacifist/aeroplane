@@ -63,13 +63,29 @@ function checkTcpReachability(name: string, address: string, timeoutMs = 500): P
   });
 }
 
+async function checkCaddy() {
+  const binary = await checkCommand("caddy");
+  if (binary.ok) return binary;
+
+  const container = await checkCommand("docker", ["inspect", "-f", "{{.State.Status}}", "deploy-caddy"]);
+  if (container.ok && container.detail === "running") {
+    return { name: "caddy", ok: true, detail: "deploy-caddy container running" };
+  }
+
+  return {
+    name: "caddy",
+    ok: false,
+    detail: `caddy binary unavailable; deploy-caddy ${container.detail}`
+  };
+}
+
 export async function getSystemChecks() {
   const [git, docker, railpack, buildkit, caddy] = await Promise.all([
     checkCommand("git"),
     checkCommand("docker"),
     checkCommand("railpack"),
     checkTcpReachability("buildkit", config.buildkitHost),
-    checkCommand("caddy")
+    checkCaddy()
   ]);
 
   return { tools: [git, docker, railpack, buildkit, caddy] };
