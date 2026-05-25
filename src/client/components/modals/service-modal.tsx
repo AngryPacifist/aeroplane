@@ -538,7 +538,12 @@ export function ServiceModal({
                     </div>
                     <h2 className="truncate font-hero text-2xl tracking-tight text-zinc-100">{service?.name ?? "Service"}</h2>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
-                      {service?.preferredDomain ? (
+                      {isDatabase ? (
+                        <div className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
+                          <AppIcon icon={CloudServerIcon} size={14} />
+                          <span className="truncate">Private database</span>
+                        </div>
+                      ) : service?.preferredDomain ? (
                         <a
                           href={service.preferredDomain.hostname.endsWith(".localhost") || service.preferredDomain.hostname === "localhost" || service.preferredDomain.hostname === "127.0.0.1"
                             ? `http://${service.preferredDomain.hostname}`

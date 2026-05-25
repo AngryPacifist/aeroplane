@@ -229,8 +229,13 @@ function urlForHostname(hostname: string) {
   return `${isLocal ? "http" : "https"}://${hostname}`;
 }
 
+function isDatabaseService(service: Pick<Service, "repoUrl" | "repoFullName">) {
+  return service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
+}
+
 async function publicService(service: Service) {
-  const localUrl = `http://127.0.0.1:${service.hostPort}`;
+  const isDatabase = isDatabaseService(service);
+  const localUrl = isDatabase ? "" : `http://127.0.0.1:${service.hostPort}`;
   const latestDeployment = db
     .select({ status: deployments.status })
     .from(deployments)
@@ -242,11 +247,11 @@ async function publicService(service: Service) {
   const reachable = shouldProbe ? await checkPortReachable(service.hostPort) : false;
   const latestDeploymentIsActive = latestDeployment?.status === "queued" || latestDeployment?.status === "building";
   const liveStatus = service.status === "active" && !reachable && !latestDeploymentIsActive ? "crashed" : service.status;
-  const serviceDomains = db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
+  const serviceDomains = isDatabase ? [] : db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
   const preferredDomain =
     serviceDomains.find((domain) => domain.status === "active") ??
     serviceDomains.find((domain) => Boolean(domain.hostname));
-  const primaryUrl = preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
+  const primaryUrl = isDatabase ? "" : preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
   const preferredDomainPayload = preferredDomain
     ? { hostname: preferredDomain.hostname, status: preferredDomain.status }
     : null;
@@ -340,7 +345,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
   db.insert(services).values(service).run();
 
   const systemSettings = getSystemSettings();
-  if (systemSettings.rootDomain) {
+  if (systemSettings.rootDomain && !isDatabaseService(service)) {
     const defaultHostname = `${serviceSlug}.${systemSettings.rootDomain}`;
     db.insert(domains)
       .values({
@@ -649,6 +654,10 @@ app.get("/api/services/:serviceId/overview", async (c) => {
   if (!service) {
     return jsonError("Service not found", 404);
   }
+  const isDatabase = isDatabaseService(service);
+  if (isDatabase) {
+    syncDatabaseUrlEnvVar(service.id);
+  }
 
   const serviceDeployments = db
     .select()
@@ -684,16 +693,18 @@ app.get("/api/services/:serviceId/overview", async (c) => {
     .all();
 
   // Dynamically check DNS configuration for each public domain in real-time
-  const updatedDomains = await Promise.all(
-    serviceDomains.map(async (d) => {
-      const status = await checkDomainDns(d.hostname, cachedPublicIp);
-      if (status !== d.status) {
-        db.update(domains).set({ status, updatedAt: nowIso() }).where(eq(domains.id, d.id)).run();
-        return { ...d, status, updatedAt: nowIso() };
-      }
-      return d;
-    })
-  );
+  const updatedDomains = isDatabase
+    ? []
+    : await Promise.all(
+        serviceDomains.map(async (d) => {
+          const status = await checkDomainDns(d.hostname, cachedPublicIp);
+          if (status !== d.status) {
+            db.update(domains).set({ status, updatedAt: nowIso() }).where(eq(domains.id, d.id)).run();
+            return { ...d, status, updatedAt: nowIso() };
+          }
+          return d;
+        })
+      );
 
   const publicFacingService = await publicService(service);
   const normalizedDeployments =
