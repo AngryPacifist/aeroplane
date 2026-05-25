@@ -1,7 +1,7 @@
 {
-  "name": "deploy",
+  "name": "aeroplane",
   "version": "0.1.0",
-  "description": "Self-hostable deployment control plane MVP powered by Railpack, Docker, and Caddy.",
+  "description": "Aeroplane is a self-hostable deployment control plane powered by Railpack, Docker, and Caddy.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "keywords": [
-    "deploy",
+    "aeroplane",
     "self-hosted",
     "railpack",
     "caddy"
