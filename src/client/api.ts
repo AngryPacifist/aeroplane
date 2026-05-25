@@ -205,5 +205,11 @@ export const api = {
     request<{ ok: boolean; projectSlug: string }>("/api/integrations/railway/import", {
       method: "POST",
       body: JSON.stringify({ apiToken, projectId, config })
+    }),
+  systemSettings: () => request<{ settings: { rootDomain: string }; publicIp: string }>("/api/system/settings"),
+  updateSystemSettings: (body: { rootDomain: string }) =>
+    request<{ ok: boolean; settings: { rootDomain: string } }>("/api/system/settings", {
+      method: "POST",
+      body: JSON.stringify(body)
     })
 };
