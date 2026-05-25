@@ -18,7 +18,9 @@ import {
   CloudServerIcon,
   CopyIcon,
   CopyCheckIcon,
-  Refresh03Icon
+  Refresh03Icon,
+  CheckmarkBadge01Icon,
+  Alert02Icon
 } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import { ClipboardEvent, FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -536,15 +538,24 @@ export function ServiceModal({
                     </div>
                     <h2 className="truncate font-hero text-2xl tracking-tight text-zinc-100">{service?.name ?? "Service"}</h2>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
-                      <Link
-                        to="/$projectSlug"
-                        params={{ projectSlug }}
-                        search={{}}
-                        className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400 transition hover:text-[#7fe3dd]"
-                      >
-                        <AppIcon icon={FolderCodeIcon} size={14} />
-                        <span className="truncate">{projectSlug}</span>
-                      </Link>
+                      {service?.preferredDomain ? (
+                        <a
+                          href={service.preferredDomain.hostname.endsWith(".localhost") || service.preferredDomain.hostname === "localhost" || service.preferredDomain.hostname === "127.0.0.1"
+                            ? `http://${service.preferredDomain.hostname}`
+                            : `https://${service.preferredDomain.hostname}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-[#4FB8B2] transition hover:text-[#7fe3dd]"
+                        >
+                          <AppIcon icon={Globe02Icon} size={14} />
+                          <span className="truncate">{service.preferredDomain.hostname}</span>
+                        </a>
+                      ) : service ? (
+                        <div className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
+                          <AppIcon icon={Globe02Icon} size={14} />
+                          <span className="truncate">No Domain</span>
+                        </div>
+                      ) : null}
                       {service ? <StatusPill status={service.status} /> : null}
                     </div>
                   </div>
@@ -975,10 +986,18 @@ export function ServiceModal({
                               {isExpanded && (
                                 <div className="border-t border-zinc-800 bg-zinc-950/45 p-5 space-y-4 font-sans" onClick={(e) => e.stopPropagation()}>
                                   <div className="flex flex-col gap-1.5">
-                                    <h4 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300">
-                                      {domain.status === "active" 
-                                        ? "✅ DNS Configured Correctly" 
-                                        : "⚠️ DNS Configuration Required"}
+                                    <h4 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300 flex items-center gap-1.5">
+                                      {domain.status === "active" ? (
+                                        <>
+                                          <AppIcon icon={CheckmarkBadge01Icon} size={15} className="text-emerald-400" />
+                                          <span>DNS Configured Correctly</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <AppIcon icon={Alert02Icon} size={15} className="text-amber-500 animate-pulse" />
+                                          <span>DNS Configuration Required</span>
+                                        </>
+                                      )}
                                     </h4>
                                     <p className="text-xs text-zinc-400 leading-relaxed">
                                       To route public internet traffic to your self-hosted service, configure an **A Record** at your domain registrar (Cloudflare, GoDaddy, Namecheap, etc.) using these details:
@@ -986,15 +1005,17 @@ export function ServiceModal({
                                   </div>
 
                                   <div className="border border-zinc-800 overflow-hidden font-mono text-xs rounded bg-zinc-900/10">
-                                    <div className="grid grid-cols-[80px_100px_1fr_auto] bg-zinc-900/60 border-b border-zinc-800 px-4 py-2 text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">
+                                    <div className="grid grid-cols-[60px_170px_1fr_80px] bg-zinc-900/60 border-b border-zinc-800 px-4 py-2 text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">
                                       <div>Type</div>
                                       <div>Host</div>
                                       <div>Points To</div>
                                       <div className="text-right">Status</div>
                                     </div>
-                                    <div className="grid grid-cols-[80px_100px_1fr_auto] items-center px-4 py-3 text-zinc-300">
-                                      <div className="font-semibold text-emerald-400">A</div>
-                                      <div className="bg-zinc-900/60 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px] w-fit font-bold">{hostName}</div>
+                                    <div className="grid grid-cols-[60px_170px_1fr_80px] items-center px-4 py-3 text-zinc-300">
+                                      <div className="font-semibold text-[#4FB8B2]">A</div>
+                                      <div className="bg-zinc-900/60 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px] w-fit font-bold whitespace-nowrap truncate max-w-[150px]" title={hostName}>
+                                        {hostName}
+                                      </div>
                                       <div className="flex items-center gap-2 truncate font-semibold text-zinc-100 select-all pr-4">
                                         {targetIp}
                                         <button 
