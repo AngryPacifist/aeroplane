@@ -1,6 +1,6 @@
-# Deploy
+# Aeroplane
 
-A self-hostable deployment control plane MVP. It connects a GitHub repo, builds source with Railpack, runs the app with Docker, streams deployment logs, injects environment variables, and writes Caddy routes for custom domains.
+Aeroplane is a self-hostable deployment control plane. It connects a GitHub repo, builds source with Railpack, runs the app with Docker, streams deployment logs, injects environment variables, and writes Caddy routes for custom domains.
 
 ## What Works Now
 
@@ -89,7 +89,7 @@ caddy run --config ./data/Caddyfile
 
 Use a real domain only if it resolves back to your Mac and inbound ports are reachable. For ordinary local testing, use a temporary Caddyfile with an HTTP localhost port.
 
-For `.localhost` development domains, add names like `hono.localhost` in the dashboard. Deploy writes these as HTTP-only Caddy routes, so `http://hono.localhost` proxies to the mapped app container without needing certificates or `/etc/hosts` changes.
+For `.localhost` development domains, add names like `hono.localhost` in the dashboard. Aeroplane writes these as HTTP-only Caddy routes, so `http://hono.localhost` proxies to the mapped app container without needing certificates or `/etc/hosts` changes.
 
 ## GitHub App Setup
 
