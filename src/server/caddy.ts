@@ -16,7 +16,7 @@ function caddyAddress(hostname: string) {
 }
 
 function localPortAddress(hostPort: number) {
-  return `http://127.0.0.1:${hostPort}`;
+  return `:${hostPort}`;
 }
 
 function staticSiteDirForService(serviceId: string) {
