@@ -3,7 +3,8 @@ import {
   Globe02Icon,
   CopyIcon,
   CopyCheckIcon,
-  CheckmarkCircle02Icon
+  CheckmarkCircle02Icon,
+  Refresh03Icon
 } from "@hugeicons/core-free-icons";
 import { useEffect, useState } from "react";
 import { api } from "../../api";
@@ -27,7 +28,8 @@ export function SystemSettingsModal({
   const [publicIp, setPublicIp] = useState("127.0.0.1");
   const [dnsStatus, setDnsStatus] = useState<"active" | "pending">("pending");
   const [copiedIp, setCopiedIp] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
 
@@ -58,7 +60,7 @@ export function SystemSettingsModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
+    setSaving(true);
     setError("");
     setSuccess(false);
     try {
@@ -72,7 +74,7 @@ export function SystemSettingsModal({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update settings");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
 
@@ -151,9 +153,9 @@ export function SystemSettingsModal({
                     <button
                       type="submit"
                       className={`${shellButton("primary")} w-full py-3`}
-                      disabled={busy}
+                      disabled={saving}
                     >
-                      {busy ? "Saving..." : "Save Settings"}
+                      {saving ? "Saving..." : "Save Settings"}
                     </button>
                   </div>
                 </form>
@@ -162,7 +164,7 @@ export function SystemSettingsModal({
                 <div className="border border-zinc-800 bg-zinc-900/10 p-6 space-y-5 font-sans text-xs">
                   <div className="flex flex-col gap-1.5">
                     <h4 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-300">
-                      🌐 Wildcard DNS Setup Instructions
+                      Wildcard DNS Setup Instructions
                     </h4>
                     <p className="text-zinc-400 leading-relaxed">
                       To route all automatically provisioned system subdomains, configure a **Wildcard A Record** at your domain registrar (Cloudflare, Namecheap, Route 53, etc.) using these details:
@@ -196,7 +198,7 @@ export function SystemSettingsModal({
                         {dnsStatus === "active" ? (
                           <span className="text-emerald-400">✓ Active</span>
                         ) : (
-                          <span className="text-amber-500 animate-pulse">⚡ Pending</span>
+                          <span className="text-amber-500 animate-pulse">Pending</span>
                         )}
                       </div>
                     </div>
@@ -210,9 +212,9 @@ export function SystemSettingsModal({
                     </span>
                     <button
                       type="button"
-                      className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 px-3.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] transition shrink-0"
+                      className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 px-3.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] transition shrink-0 gap-1.5 hover:border-zinc-500 hover:text-white disabled:opacity-55 disabled:cursor-not-allowed"
                       onClick={async () => {
-                        setBusy(true);
+                        setVerifying(true);
                         try {
                           const res = await api.systemSettings();
                           setDnsStatus(res.dnsStatus || "pending");
@@ -220,21 +222,21 @@ export function SystemSettingsModal({
                         } catch (err) {
                           console.error("Verification failed:", err);
                         } finally {
-                          setBusy(false);
+                          setVerifying(false);
                         }
                       }}
-                      disabled={busy}
+                      disabled={verifying}
                     >
-                      🔄 Refresh & Verify
+                      <AppIcon icon={Refresh03Icon} size={13} className={verifying ? "animate-spin" : ""} /> Refresh & Verify
                     </button>
                   </div>
 
                   <div className="border-t border-zinc-800/80 pt-4 text-[10px] text-zinc-500 leading-relaxed space-y-3">
                     <p>
-                      👉 The wildcard character <code className="text-zinc-400 bg-zinc-900/80 px-1 font-mono">*</code> matches any subdomain requested by a client (e.g. <code className="text-[#4FB8B2]">my-db.pilot.aeroplane.run</code>).
+                      The wildcard character <code className="text-zinc-400 bg-zinc-900/80 px-1 font-mono">*</code> matches any subdomain requested by a client (e.g. <code className="text-[#4FB8B2]">my-db.pilot.aeroplane.run</code>).
                     </p>
                     <p>
-                      🛡️ Caddy reverse-proxy will automatically intercept wildcard hits, locate the active container port by slug matching, and dynamically register/provision separate SSL/TLS certificates.
+                      Caddy reverse-proxy will automatically intercept wildcard hits, locate the active container port by slug matching, and dynamically register/provision separate SSL/TLS certificates.
                     </p>
                   </div>
                 </div>
