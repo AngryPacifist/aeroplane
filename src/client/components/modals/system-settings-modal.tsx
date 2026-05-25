@@ -1,31 +1,25 @@
 import { Globe02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
-import { useEffect, useState } from "react";
 import { AppIcon, SectionTitle, shellButton, surfaceClass } from "../ui/primitives";
 import { RootDomainSettingsPanel } from "./root-domain-settings-panel";
+import type { SystemSettingsTab } from "./system-settings-types";
 import { UpdatesSettingsPanel } from "./updates-settings-panel";
 
-type SettingsTab = "root-domain" | "updates";
-
-const settingsTabs: Array<{ id: SettingsTab; label: string; icon: unknown }> = [
+const settingsTabs: Array<{ id: SystemSettingsTab; label: string; icon: unknown }> = [
   { id: "root-domain", label: "Root Domain", icon: Globe02Icon },
   { id: "updates", label: "Updates", icon: Refresh03Icon }
 ];
 
 export function SystemSettingsModal({
+  activeTab,
+  onTabChange,
   open,
   onClose
 }: {
+  activeTab: SystemSettingsTab;
+  onTabChange: (tab: SystemSettingsTab) => void;
   open: boolean;
   onClose: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("root-domain");
-
-  useEffect(() => {
-    if (open) {
-      setActiveTab("root-domain");
-    }
-  }, [open]);
-
   if (!open) return null;
 
   return (
@@ -53,7 +47,7 @@ export function SystemSettingsModal({
                           ? "flex w-full items-center gap-2.5 border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-left font-mono text-xs font-semibold uppercase tracking-wider text-[#4FB8B2]"
                           : "flex w-full items-center gap-2.5 border border-transparent px-3 py-2.5 text-left font-mono text-xs font-semibold uppercase tracking-wider text-zinc-500 transition hover:border-zinc-800 hover:bg-zinc-900/55 hover:text-zinc-200"
                       }
-                      onClick={() => setActiveTab(tab.id)}
+                      onClick={() => onTabChange(tab.id)}
                     >
                       <AppIcon icon={tab.icon} size={15} />
                       {tab.label}
