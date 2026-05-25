@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { AddSquareIcon, WorkflowSquare07Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon } from "@hugeicons/core-free-icons";
 import type { ToolCheck } from "../../api";
+import { BrandMark } from "../ui/brand-mark";
 import { AppIcon, shellButton } from "../ui/primitives";
 
 export function RootHeader({
@@ -14,11 +15,11 @@ export function RootHeader({
     <header className="border-b border-neutral-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-5 py-4 md:px-8">
         <Link to="/" className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-neutral-950 text-white">
-            <AppIcon icon={WorkflowSquare07Icon} size={18} />
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#4FB8B2]/10 text-[#4FB8B2]">
+            <BrandMark />
           </div>
           <div>
-            <div className="text-base font-medium tracking-tight text-neutral-950">Deploy</div>
+            <div className="text-base font-medium tracking-tight text-neutral-950">Aeroplane</div>
             <div className="text-sm text-neutral-500">projects, services, domains</div>
           </div>
         </Link>
