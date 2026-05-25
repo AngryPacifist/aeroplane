@@ -205,26 +205,47 @@ function probePort(port: number, timeoutMs = 20000): Promise<void> {
   return new Promise<void>((resolvePromise, reject) => {
     function next() {
       if (Date.now() - startTime > timeoutMs) {
-        reject(new Error(`TCP probe timed out on port ${port} after ${timeoutMs}ms`));
+        reject(new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`));
         return;
       }
 
       const socket = new net.Socket();
       socket.setTimeout(1000);
       
-      socket.once("connect", () => {
+      let resolved = false;
+      const done = (err?: Error) => {
+        if (resolved) return;
+        resolved = true;
         socket.destroy();
-        resolvePromise();
+        if (err) {
+          setTimeout(next, 200);
+        } else {
+          resolvePromise();
+        }
+      };
+
+      socket.once("connect", () => {
+        // Send a minimal HTTP request. If the container is listening, it will receive and handle it.
+        // If the container is not listening on that port, docker-proxy will reset/close the connection.
+        socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+      });
+
+      socket.on("data", () => {
+        // Receiving any data means the application is up and responded!
+        done();
       });
 
       socket.once("timeout", () => {
-        socket.destroy();
-        setTimeout(next, 200);
+        done(new Error("Timeout"));
       });
 
-      socket.once("error", () => {
-        socket.destroy();
-        setTimeout(next, 200);
+      socket.once("error", (err) => {
+        done(err);
+      });
+
+      socket.once("close", () => {
+        // If the connection was closed by docker-proxy without any data received, it means port mismatch
+        done(new Error("Connection closed without response"));
       });
 
       socket.connect(port, "127.0.0.1");
