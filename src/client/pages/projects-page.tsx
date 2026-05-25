@@ -1,11 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
-import { AddSquareIcon, FolderCodeIcon, Globe02Icon, WorkflowSquare07Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon, FolderCodeIcon, Globe02Icon, WorkflowSquare07Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api";
 import { AppIcon, FrameworkMark } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
+import { SystemSettingsModal } from "../components/modals/system-settings-modal";
 
 function ServiceCluster({ project }: { project: ProjectCard }) {
   const previewServices = project.services.slice(0, 7);
@@ -45,6 +46,7 @@ export function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [railwayImportOpen, setRailwayImportOpen] = useState(false);
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState("");
 
   const loadProjects = useCallback(async () => {
@@ -117,6 +119,14 @@ export function ProjectsPage() {
                 <AppIcon icon={AddSquareIcon} size={16} />
                 New project
               </button>
+              <button
+                type="button"
+                className="inline-flex h-[38px] w-[38px] items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                title="System Settings"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <AppIcon icon={Settings01Icon} size={16} />
+              </button>
             </div>
           </header>
 
@@ -188,6 +198,7 @@ export function ProjectsPage() {
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
       <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
       <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
+      <SystemSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }
