@@ -96,7 +96,7 @@ async function githubRequest<T>(path: string, options: { body?: unknown; token?:
       Accept: "application/vnd.github+json",
       Authorization: `${options.tokenKind === "token" ? "token" : "Bearer"} ${options.token ?? config.githubAccessToken}`,
       "Content-Type": "application/json",
-      "User-Agent": "deploy-control-plane",
+      "User-Agent": "aeroplane-control-plane",
       "X-GitHub-Api-Version": "2022-11-28"
     },
     body: options.body ? JSON.stringify(options.body) : undefined
