@@ -25,6 +25,7 @@ export type Service = {
   reachable: boolean;
   localUrl: string;
   primaryUrl: string;
+  preferredDomain: { hostname: string; status: string } | null;
   framework: Framework | null;
   lastDeployedAt: null | string;
   createdAt: string;
@@ -183,6 +184,8 @@ export const api = {
     request(`/api/services/${serviceId}/domains`, { method: "POST", body: JSON.stringify(body) }),
   deleteDomain: (serviceId: string, domainId: string) =>
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" }),
+  updateDomain: (serviceId: string, domainId: string, body: { hostname: string }) =>
+    request(`/api/services/${serviceId}/domains/${domainId}`, { method: "PATCH", body: JSON.stringify(body) }),
   railwayProjects: (apiToken: string) =>
     request<{ projects: Array<{ id: string; name: string; description: string; serviceCount: number }> }>(
       "/api/integrations/railway/projects",
@@ -206,7 +209,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ apiToken, projectId, config })
     }),
-  systemSettings: () => request<{ settings: { rootDomain: string }; publicIp: string }>("/api/system/settings"),
+  systemSettings: () => request<{ settings: { rootDomain: string }; publicIp: string; dnsStatus?: "active" | "pending" }>("/api/system/settings"),
   updateSystemSettings: (body: { rootDomain: string }) =>
     request<{ ok: boolean; settings: { rootDomain: string } }>("/api/system/settings", {
       method: "POST",
