@@ -33,6 +33,7 @@ import {
 import { getSystemChecks } from "./system.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { createUniqueSlug } from "../shared/slug.js";
+import { getSystemSettings, saveSystemSettings } from "./system-settings.js";
 
 const app = new Hono();
 
@@ -437,6 +438,17 @@ function syncAllExistingDatabaseUrls() {
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.get("/api/system", async (c) => c.json(await getSystemChecks()));
+
+app.get("/api/system/settings", (c) => {
+  return c.json({ settings: getSystemSettings(), publicIp: cachedPublicIp });
+});
+
+app.post("/api/system/settings", async (c) => {
+  const body = await c.req.json();
+  const rootDomain = String(body.rootDomain ?? "").trim().toLowerCase();
+  saveSystemSettings({ rootDomain });
+  return c.json({ ok: true, settings: { rootDomain } });
+});
 
 app.get("/api/github/status", async (c) => {
   try {
@@ -1132,6 +1144,9 @@ if (process.env.NODE_ENV === "production") {
 }
 
 syncAllExistingDatabaseUrls();
+void writeAndReloadCaddy().catch((error) => {
+  console.error("Failed to write Caddy config on startup:", error);
+});
 startDeployWorker();
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
