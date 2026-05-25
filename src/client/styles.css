@@ -4,6 +4,11 @@
 @theme {
   --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-hero: "Unbounded", ui-sans-serif, system-ui, sans-serif;
+  --color-aeroplane: #4fb8b2;
+}
+
+html {
+  accent-color: #4fb8b2;
 }
 
 html,
