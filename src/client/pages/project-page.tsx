@@ -21,6 +21,7 @@ import { DeleteProjectModal } from "../components/modals/delete-project-modal";
 import { ServiceModal } from "../components/modals/service-modal";
 import type { ModalTab, ServiceFormPayload } from "../components/modals/service-modal-types";
 import { formatTime } from "../lib/format";
+import { usePageTitle } from "../lib/page-title";
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -88,6 +89,9 @@ export function ProjectPage({
   }, [editingProject, project]);
 
   const selectedService = project?.services.find((service) => service.id === selectedServiceId) ?? null;
+  const projectTitle = project?.name ?? projectSlug;
+  const pageTitle = selectedService ? `${selectedService.name} - ${projectTitle}` : projectTitle;
+  usePageTitle(pageTitle);
 
   async function createService(payload: ServiceFormPayload) {
     if (!project) return;
@@ -231,7 +235,7 @@ export function ProjectPage({
                 </div>
                 <h2 className="mt-6 font-hero text-3xl font-extrabold tracking-tight text-zinc-100">No services yet</h2>
                 <p className="mt-3 max-w-lg font-mono text-sm leading-relaxed text-zinc-500">
-                  Add a service and wire up the repo, branch, directory, deploy history, and runtime surface from here.
+                  Add a service and wire up the repo, branch, directory, deployment history, and runtime surface from here.
                 </p>
                 <button
                   type="button"
