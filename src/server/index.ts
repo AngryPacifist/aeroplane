@@ -34,6 +34,7 @@ import { getSystemChecks } from "./system.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { getSystemSettings, saveSystemSettings } from "./system-settings.js";
+import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
 
 const app = new Hono();
 
@@ -473,6 +474,10 @@ app.post("/api/system/settings", async (c) => {
   saveSystemSettings({ rootDomain });
   return c.json({ ok: true, settings: { rootDomain } });
 });
+
+app.get("/api/system/updates", async (c) => c.json(await getSystemUpdateInfo()));
+
+app.post("/api/system/updates/apply", (c) => c.json({ ok: true, updateRun: startSystemUpdate() }));
 
 app.get("/api/github/status", async (c) => {
   try {
