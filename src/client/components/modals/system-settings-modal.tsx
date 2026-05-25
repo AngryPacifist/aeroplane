@@ -25,6 +25,7 @@ export function SystemSettingsModal({
 }) {
   const [rootDomain, setRootDomain] = useState("");
   const [publicIp, setPublicIp] = useState("127.0.0.1");
+  const [dnsStatus, setDnsStatus] = useState<"active" | "pending">("pending");
   const [copiedIp, setCopiedIp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -37,6 +38,7 @@ export function SystemSettingsModal({
         const res = await api.systemSettings();
         setRootDomain(res.settings.rootDomain);
         setPublicIp(res.publicIp || "127.0.0.1");
+        setDnsStatus(res.dnsStatus || "pending");
       } catch (err) {
         console.error("Failed to load settings:", err);
       }
@@ -63,6 +65,10 @@ export function SystemSettingsModal({
       await api.updateSystemSettings({ rootDomain });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
+      
+      const res = await api.systemSettings();
+      setDnsStatus(res.dnsStatus || "pending");
+      setPublicIp(res.publicIp || "127.0.0.1");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update settings");
     } finally {
@@ -164,18 +170,19 @@ export function SystemSettingsModal({
                   </div>
 
                   <div className="border border-zinc-800 overflow-hidden font-mono text-[11px] rounded bg-zinc-950/45">
-                    <div className="grid grid-cols-[60px_220px_1fr] bg-zinc-900/60 border-b border-zinc-800 px-4 py-2 text-zinc-500 font-semibold uppercase tracking-wider text-[9px]">
+                    <div className="grid grid-cols-[60px_170px_1fr_80px] bg-zinc-900/60 border-b border-zinc-800 px-4 py-2 text-zinc-500 font-semibold uppercase tracking-wider text-[9px]">
                       <div>Type</div>
                       <div>Host</div>
                       <div>Points To</div>
+                      <div className="text-right">Status</div>
                     </div>
-                    <div className="grid grid-cols-[60px_220px_1fr] items-center px-4 py-3.5 text-zinc-300">
+                    <div className="grid grid-cols-[60px_170px_1fr_80px] items-center px-4 py-3.5 text-zinc-300">
                       <div className="font-semibold text-[#4FB8B2]">A</div>
-                      <div className="bg-zinc-900/60 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px] w-fit max-w-[200px] truncate font-bold select-all" title={`*.${rootDomain || "pilot.aeroplane.run"}`}>
+                      <div className="bg-zinc-900/60 border border-zinc-800 px-1.5 py-0.5 rounded text-[10px] w-fit max-w-[150px] truncate font-bold select-all" title={`*.${rootDomain || "pilot.aeroplane.run"}`}>
                         *.{rootDomain || "pilot.aeroplane.run"}
                       </div>
-                      <div className="flex items-center gap-2 truncate font-semibold text-zinc-100 pl-1">
-                        <span className="select-all">{publicIp}</span>
+                      <div className="flex items-center gap-2 truncate font-semibold text-zinc-100 pl-1 min-w-0">
+                        <span className="select-all truncate">{publicIp}</span>
                         <button
                           type="button"
                           onClick={handleCopyIp}
@@ -185,7 +192,41 @@ export function SystemSettingsModal({
                           <AppIcon icon={copiedIp ? CopyCheckIcon : CopyIcon} size={13} />
                         </button>
                       </div>
+                      <div className="flex items-center justify-end text-right font-semibold text-[11px] shrink-0">
+                        {dnsStatus === "active" ? (
+                          <span className="text-emerald-400">✓ Active</span>
+                        ) : (
+                          <span className="text-amber-500 animate-pulse">⚡ Pending</span>
+                        )}
+                      </div>
                     </div>
+                  </div>
+
+                  <div className="flex flex-col gap-4 border-t border-zinc-800/80 pt-4 mt-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-[10px] text-zinc-500 font-mono leading-relaxed max-w-[240px]">
+                      {dnsStatus === "active" 
+                        ? "Perfect! Caddy reverse-proxy wildcard SSL/TLS certificates will automatically renew natively." 
+                        : "DNS propagation can take a few minutes. Click verify to check again."}
+                    </span>
+                    <button
+                      type="button"
+                      className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 px-3.5 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] transition shrink-0"
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          const res = await api.systemSettings();
+                          setDnsStatus(res.dnsStatus || "pending");
+                          setPublicIp(res.publicIp || "127.0.0.1");
+                        } catch (err) {
+                          console.error("Verification failed:", err);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      disabled={busy}
+                    >
+                      🔄 Refresh & Verify
+                    </button>
                   </div>
 
                   <div className="border-t border-zinc-800/80 pt-4 text-[10px] text-zinc-500 leading-relaxed space-y-3">
