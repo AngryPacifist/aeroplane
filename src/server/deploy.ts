@@ -18,6 +18,12 @@ type RunOptions = {
   redact?: string[];
 };
 
+type BufferedCommandResult = {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+};
+
 type EnqueueOptions = {
   commitSha?: string;
   trigger: "manual" | "github";
@@ -128,6 +134,31 @@ function runCommand(command: string, args: string[], deploymentId: string, optio
   });
 }
 
+function runBufferedCommand(command: string, args: string[], options: RunOptions = {}): Promise<BufferedCommandResult> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolvePromise({ code: 1, stdout, stderr: stderr || error.message });
+    });
+    child.on("close", (code) => {
+      resolvePromise({ code, stdout, stderr });
+    });
+  });
+}
+
 function cloneUrlWithToken(repoUrl: string, token?: string | null) {
   if (!token || !repoUrl.startsWith("https://github.com/")) {
     return repoUrl;
@@ -200,59 +231,110 @@ function getEphemeralFreePort(): Promise<number> {
   });
 }
 
-function probePort(port: number, timeoutMs = 20000): Promise<void> {
-  const startTime = Date.now();
+function delay(ms: number) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function probePortOnce(port: number): Promise<void> {
   return new Promise<void>((resolvePromise, reject) => {
-    function next() {
-      if (Date.now() - startTime > timeoutMs) {
-        reject(new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`));
-        return;
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+
+    let resolved = false;
+    const done = (err?: Error) => {
+      if (resolved) return;
+      resolved = true;
+      socket.destroy();
+      if (err) {
+        reject(err);
+      } else {
+        resolvePromise();
       }
+    };
 
-      const socket = new net.Socket();
-      socket.setTimeout(1000);
-      
-      let resolved = false;
-      const done = (err?: Error) => {
-        if (resolved) return;
-        resolved = true;
-        socket.destroy();
-        if (err) {
-          setTimeout(next, 200);
-        } else {
-          resolvePromise();
-        }
-      };
+    socket.once("connect", () => {
+      socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    });
 
-      socket.once("connect", () => {
-        // Send a minimal HTTP request. If the container is listening, it will receive and handle it.
-        // If the container is not listening on that port, docker-proxy will reset/close the connection.
-        socket.write("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-      });
+    socket.on("data", () => {
+      done();
+    });
 
-      socket.on("data", () => {
-        // Receiving any data means the application is up and responded!
-        done();
-      });
+    socket.once("timeout", () => {
+      done(new Error("Timeout"));
+    });
 
-      socket.once("timeout", () => {
-        done(new Error("Timeout"));
-      });
+    socket.once("error", (err) => {
+      done(err);
+    });
 
-      socket.once("error", (err) => {
-        done(err);
-      });
+    socket.once("close", () => {
+      done(new Error("Connection closed without response"));
+    });
 
-      socket.once("close", () => {
-        // If the connection was closed by docker-proxy without any data received, it means port mismatch
-        done(new Error("Connection closed without response"));
-      });
+    socket.connect(port, "127.0.0.1");
+  });
+}
 
-      socket.connect(port, "127.0.0.1");
+async function probePort(port: number, timeoutMs = 20000): Promise<void> {
+  const startTime = Date.now();
+  while (Date.now() - startTime <= timeoutMs) {
+    try {
+      await probePortOnce(port);
+      return;
+    } catch {
+      await delay(200);
+    }
+  }
+
+  throw new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`);
+}
+
+async function getContainerState(containerName: string) {
+  const result = await runBufferedCommand("docker", [
+    "inspect",
+    "--format",
+    "{{.State.Running}}|{{.State.Status}}|{{.State.ExitCode}}|{{.State.Error}}",
+    containerName
+  ]);
+  if (result.code !== 0) return null;
+
+  const [running = "", status = "unknown", exitCode = "", error = ""] = result.stdout.trim().split("|");
+  return {
+    running: running === "true",
+    status,
+    exitCode: Number(exitCode),
+    error
+  };
+}
+
+async function appendContainerLogs(containerName: string, deploymentId: string, secrets: string[]) {
+  appendDeploymentLog(deploymentId, `Container startup logs from ${containerName}:`, "stderr", secrets);
+  await runCommand("docker", ["logs", "--tail", "120", containerName], deploymentId, { redact: secrets }).catch((error) => {
+    const message = error instanceof Error ? error.message : "Could not read container logs";
+    appendDeploymentLog(deploymentId, `Could not read container logs: ${message}`, "stderr", secrets);
+  });
+}
+
+async function probeContainerStartup(port: number, containerName: string, timeoutMs = 20000) {
+  const startTime = Date.now();
+  while (Date.now() - startTime <= timeoutMs) {
+    const state = await getContainerState(containerName);
+    if (state && !state.running) {
+      const exitText = Number.isFinite(state.exitCode) ? ` with exit code ${state.exitCode}` : "";
+      const errorText = state.error ? `: ${state.error}` : "";
+      throw new Error(`Container exited during startup${exitText}${errorText}`);
     }
 
-    next();
-  });
+    try {
+      await probePortOnce(port);
+      return;
+    } catch {
+      await delay(200);
+    }
+  }
+
+  throw new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`);
 }
 
 function escapeDockerEnvValue(value: string) {
@@ -770,11 +852,13 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
     appendDeploymentLog(deployment.id, `Probing port ${tempPort} for startup TCP health check...`);
     try {
-      await probePort(tempPort);
+      await probeContainerStartup(tempPort, tempContainerName);
       appendDeploymentLog(deployment.id, `Startup TCP probe succeeded. Container is healthy.`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      appendDeploymentLog(deployment.id, `Startup TCP probe failed: ${errMsg}. Cleaning up temporary container...`, "stderr");
+      appendDeploymentLog(deployment.id, `Startup health check failed: ${errMsg}.`, "stderr");
+      await appendContainerLogs(tempContainerName, deployment.id, secrets);
+      appendDeploymentLog(deployment.id, "Cleaning up temporary container...", "stderr");
       await runCommand("docker", ["rm", "-f", tempContainerName], deployment.id).catch(() => {});
       throw new Error(`Health check failed: ${errMsg}`);
     }
