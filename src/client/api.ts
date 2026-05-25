@@ -187,9 +187,22 @@ export const api = {
       "/api/integrations/railway/projects",
       { method: "POST", body: JSON.stringify({ apiToken }) }
     ),
-  railwayImport: (apiToken: string, projectId: string) =>
-    request<{ ok: boolean; projectSlug: string }>("/api/integrations/railway/import", {
+  railwayProjectDetails: (apiToken: string, projectId: string) =>
+    request<{
+      details: {
+        id: string;
+        name: string;
+        description: string;
+        services: Array<{ id: string; name: string }>;
+        environments: Array<{ id: string; name: string }>;
+      };
+    }>("/api/integrations/railway/project-details", {
       method: "POST",
       body: JSON.stringify({ apiToken, projectId })
+    }),
+  railwayImport: (apiToken: string, projectId: string, config?: unknown) =>
+    request<{ ok: boolean; projectSlug: string }>("/api/integrations/railway/import", {
+      method: "POST",
+      body: JSON.stringify({ apiToken, projectId, config })
     })
 };
