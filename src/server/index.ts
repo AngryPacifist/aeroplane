@@ -246,6 +246,9 @@ async function publicService(service: Service) {
     serviceDomains.find((domain) => domain.status === "active") ??
     serviceDomains.find((domain) => Boolean(domain.hostname));
   const primaryUrl = preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
+  const preferredDomainPayload = preferredDomain
+    ? { hostname: preferredDomain.hostname, status: preferredDomain.status }
+    : null;
   const framework = await detectFramework(service.repoFullName, service.branch, service.rootDir);
 
   return {
@@ -268,6 +271,7 @@ async function publicService(service: Service) {
     reachable,
     localUrl,
     primaryUrl,
+    preferredDomain: preferredDomainPayload,
     framework,
     lastDeployedAt: service.lastDeployedAt,
     createdAt: service.createdAt,
@@ -333,6 +337,21 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
   };
 
   db.insert(services).values(service).run();
+
+  const systemSettings = getSystemSettings();
+  if (systemSettings.rootDomain) {
+    const defaultHostname = `${serviceSlug}.${systemSettings.rootDomain}`;
+    db.insert(domains)
+      .values({
+        id: nanoid(10),
+        serviceId: service.id,
+        hostname: defaultHostname,
+        status: "pending",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+      .run();
+  }
   if (input.env.length > 0) {
     const timestamp = nowIso();
     const uniqueEnv = new Map<string, string>();
@@ -439,8 +458,13 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.get("/api/system", async (c) => c.json(await getSystemChecks()));
 
-app.get("/api/system/settings", (c) => {
-  return c.json({ settings: getSystemSettings(), publicIp: cachedPublicIp });
+app.get("/api/system/settings", async (c) => {
+  const settings = getSystemSettings();
+  let dnsStatus = "pending";
+  if (settings.rootDomain) {
+    dnsStatus = await checkDomainDns(`dns-test.${settings.rootDomain}`, cachedPublicIp);
+  }
+  return c.json({ settings, publicIp: cachedPublicIp, dnsStatus });
 });
 
 app.post("/api/system/settings", async (c) => {
@@ -570,6 +594,7 @@ app.post("/api/projects/:projectId/services", async (c) => {
 
   const service = createServiceRecord(project.id, body.data);
   db.update(projectGroups).set({ updatedAt: nowIso() }).where(eq(projectGroups.id, project.id)).run();
+  await writeAndReloadCaddy();
   return c.json({ service: await publicService(service) }, 201);
 });
 
@@ -1040,6 +1065,30 @@ app.delete("/api/services/:serviceId/domains/:domainId", async (c) => {
   return c.json({ ok: true, caddy });
 });
 
+app.patch("/api/services/:serviceId/domains/:domainId", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service) {
+    return jsonError("Service not found", 404);
+  }
+
+  const body = domainSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid domain");
+  }
+
+  const hostname = body.data.hostname.trim().toLowerCase();
+  const isLocal = hostname.endsWith(".localhost") || hostname === "localhost" || hostname === "127.0.0.1";
+  const status = isLocal ? "active" : "pending";
+
+  db.update(domains)
+    .set({ hostname, status, updatedAt: nowIso() })
+    .where(eq(domains.id, c.req.param("domainId")))
+    .run();
+
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ ok: true, caddy });
+});
+
 app.post("/api/github/app/webhook", async (c) => {
   if (!config.githubWebhookSecret) {
     return jsonError("GitHub webhook secret is not configured", 503);
@@ -1149,6 +1198,6 @@ void writeAndReloadCaddy().catch((error) => {
 });
 startDeployWorker();
 
-serve({ fetch: app.fetch, port: config.port }, (info) => {
-  console.log(`Deploy control plane listening on http://localhost:${info.port}`);
+serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
+  console.log(`Deploy control plane listening on http://${info.address}:${info.port}`);
 });
