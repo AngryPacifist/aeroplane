@@ -42,7 +42,9 @@ applyEnvFile(resolve(process.cwd(), ".env.local"));
 
 export const config = {
   port: Number(process.env.PORT ?? 4310),
+  host: process.env.HOST ?? "0.0.0.0",
   publicUrl: process.env.PUBLIC_URL ?? "http://localhost:5173",
+  controlPlaneHostname: process.env.CONTROL_PLANE_HOSTNAME?.trim().toLowerCase() ?? "",
   dataDir: resolve(process.env.DATA_DIR ?? "data"),
   deployDryRun: process.env.DEPLOY_DRY_RUN === "true",
   githubAccessToken: process.env.GITHUB_ACCESS_TOKEN ?? "",
