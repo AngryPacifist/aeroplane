@@ -181,6 +181,8 @@ export function ServiceModal({
   const [domainForm, setDomainForm] = useState({ hostname: "" });
   const [expandedDomainId, setExpandedDomainId] = useState<string | null>(null);
   const [copiedIpDomainId, setCopiedIpDomainId] = useState<string | null>(null);
+  const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
+  const [editingHostname, setEditingHostname] = useState("");
   const [settings, setSettings] = useState({
     name: "",
     repoFullName: "",
@@ -795,46 +797,103 @@ export function ServiceModal({
                         }
                       };
 
+                      const isEditing = editingDomainId === domain.id;
+
                       return (
                         <div 
                           key={domain.id} 
                           className={`border border-zinc-700 bg-zinc-900/88 transition-all duration-200 overflow-hidden ${
-                            isLocal ? "" : "hover:border-zinc-500 cursor-pointer"
+                            isLocal || isEditing ? "" : "hover:border-zinc-500 cursor-pointer"
                           }`}
                           onClick={() => {
-                            if (!isLocal) {
+                            if (!isLocal && !isEditing) {
                               setExpandedDomainId(isExpanded ? null : domain.id);
                             }
                           }}
                         >
                           <div className="flex items-center justify-between px-5 py-4 select-none">
-                            <div>
-                              <div className="font-semibold font-mono text-sm text-zinc-100 flex items-center gap-2">
-                                <AppIcon icon={Globe02Icon} size={15} className="text-[#4FB8B2]" />
-                                {domain.hostname}
-                              </div>
-                              <div className="text-[10px] text-zinc-400 font-mono mt-1.5 uppercase tracking-wider flex items-center gap-1.5">
-                                <span>{isLocal ? "⚡ Local loopback DNS" : "🌐 Public custom domain"}</span>
-                                {!isLocal && (
-                                  <span className="text-[9px] text-[#4FB8B2]/80 border border-[#4FB8B2]/30 px-1 py-0.2">
-                                    {isExpanded ? "Click to collapse" : "Click to configure"}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <StatusPill status={domain.status} />
-                              <button 
-                                type="button" 
-                                className={shellButton("ghost")} 
-                                onClick={(e) => {
+                            {isEditing ? (
+                              <form 
+                                className="flex flex-1 items-center gap-3" 
+                                onSubmit={(e) => {
+                                  e.preventDefault();
                                   e.stopPropagation();
-                                  void doAction("domain", async () => void api.deleteDomain(serviceId, domain.id));
+                                  void doAction("domain", async () => {
+                                    await api.updateDomain(serviceId, domain.id, { hostname: editingHostname });
+                                    setEditingDomainId(null);
+                                  });
                                 }}
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                Remove
-                              </button>
-                            </div>
+                                <div className="flex-1 min-w-0">
+                                  <input
+                                    type="text"
+                                    value={editingHostname}
+                                    onChange={(e) => setEditingHostname(e.target.value)}
+                                    className="w-full bg-zinc-950 border border-zinc-700 px-3 py-1.5 text-xs font-mono text-zinc-100 rounded focus:border-[#4FB8B2]/50 focus:outline-none"
+                                    required
+                                    placeholder="sub.domain.com"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="submit"
+                                    className={`${shellButton("primary")} !h-8 !px-3 font-semibold text-xs`}
+                                    disabled={busy === "domain"}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`${shellButton("ghost")} !h-8 !px-3 text-xs`}
+                                    onClick={() => setEditingDomainId(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </form>
+                            ) : (
+                              <>
+                                <div>
+                                  <div className="font-semibold font-mono text-sm text-zinc-100 flex items-center gap-2">
+                                    <AppIcon icon={Globe02Icon} size={15} className="text-[#4FB8B2]" />
+                                    {domain.hostname}
+                                  </div>
+                                  <div className="text-[10px] text-zinc-400 font-mono mt-1.5 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span>{isLocal ? "⚡ Local loopback DNS" : "🌐 Public custom domain"}</span>
+                                    {!isLocal && (
+                                      <span className="text-[9px] text-[#4FB8B2]/80 border border-[#4FB8B2]/30 px-1 py-0.2">
+                                        {isExpanded ? "Click to collapse" : "Click to configure"}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <StatusPill status={domain.status} />
+                                  <button 
+                                    type="button" 
+                                    className={shellButton("ghost")} 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingDomainId(domain.id);
+                                      setEditingHostname(domain.hostname);
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button 
+                                    type="button" 
+                                    className={shellButton("ghost")} 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void doAction("domain", async () => void api.deleteDomain(serviceId, domain.id));
+                                    }}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
 
                           {/* Expandable DNS panel */}
