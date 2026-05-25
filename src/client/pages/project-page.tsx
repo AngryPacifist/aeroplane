@@ -282,15 +282,28 @@ export function ProjectPage({
                                   Connect at {window.location.hostname}:{service.hostPort}
                                 </div>
                               ) : service.reachable ? (
-                                <a
-                                  href={visibleUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="mt-1 block truncate text-sm text-zinc-500 transition hover:text-[#7fe3dd]"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  {visibleLabel}
-                                </a>
+                                <div className="mt-1 flex items-center gap-2.5 min-w-0">
+                                  <a
+                                    href={visibleUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="truncate text-sm text-[#4FB8B2] hover:text-[#7fe3dd] transition"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    {visibleLabel}
+                                  </a>
+                                  {service.preferredDomain && (
+                                    <span 
+                                      className={`inline-flex items-center px-1.5 py-0.2 rounded font-mono text-[9px] uppercase tracking-wider font-bold shrink-0 ${
+                                        service.preferredDomain.status === "active"
+                                          ? "border border-emerald-500/30 bg-emerald-950/25 text-emerald-400"
+                                          : "border border-amber-500/30 bg-amber-950/25 text-amber-400 animate-pulse"
+                                      }`}
+                                    >
+                                      {service.preferredDomain.status === "active" ? "✓ Active" : "⚡ Pending"}
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <div className={`mt-1 truncate text-sm ${unavailableClass}`}>{unavailableLabel}</div>
                               )}
