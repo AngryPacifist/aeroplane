@@ -1,44 +1,16 @@
 import { useNavigate } from "@tanstack/react-router";
-import { AddSquareIcon, FolderCodeIcon, Globe02Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon, FolderCodeIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api";
 import { BrandMark } from "../components/ui/brand-mark";
-import { AppIcon, FrameworkMark } from "../components/ui/primitives";
+import { AppIcon } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
+import { ServiceCluster } from "../features/projects/service-cluster";
+import { SystemHealthPill } from "../features/projects/system-health-pill";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import { SystemSettingsModal } from "../components/modals/system-settings-modal";
 import { usePageTitle } from "../lib/page-title";
-
-function ServiceCluster({ project }: { project: ProjectCard }) {
-  const previewServices = project.services.slice(0, 7);
-  const extraCount = Math.max(0, project.serviceCount - previewServices.length);
-
-  return (
-    <div className="border border-zinc-800/90 bg-zinc-950/55 p-2">
-      <div className="flex min-h-[150px] items-center justify-center bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[length:18px_18px] p-5">
-        <div className="grid grid-cols-4 gap-2">
-          {previewServices.map((service) => (
-            <div
-              key={service.id}
-              className="flex h-10 w-10 items-center justify-center border border-zinc-700 bg-zinc-900/92 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
-            >
-              <FrameworkMark framework={service.framework} size={17} fallback={<AppIcon icon={Globe02Icon} size={15} className="text-zinc-400" />} />
-            </div>
-          ))}
-          {previewServices.length === 0 ? (
-            <div className="flex h-full min-h-[150px] items-center justify-center text-xs text-zinc-600">No services yet.</div>
-          ) : null}
-          {extraCount > 0 ? (
-            <div className="flex h-10 w-10 items-center justify-center border border-zinc-700 bg-zinc-900/92 font-mono text-xs tracking-[0.08em] text-zinc-400">
-              +{extraCount}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -98,38 +70,35 @@ export function ProjectsPage() {
                 <div className="font-hero text-lg tracking-tight text-zinc-100">Projects</div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-2 lg:flex">
-                {tools.slice(0, 4).map((tool) => (
-                  <div key={tool.name} className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                    <span className={`h-1.5 w-1.5 rounded-full ${tool.ok ? "bg-[#4FB8B2]" : "bg-zinc-700"}`} />
-                    {tool.name}
-                  </div>
-                ))}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="hidden sm:block">
+                <SystemHealthPill tools={tools} />
               </div>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 border border-[#E93D82]/50 bg-[#E93D82]/10 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#E93D82] transition-colors hover:bg-[#E93D82]/20"
+                className="inline-flex h-9 items-center justify-center gap-2 border border-[#E93D82]/45 bg-[#E93D82]/10 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#E93D82] transition-colors hover:bg-[#E93D82]/20"
                 onClick={() => setRailwayImportOpen(true)}
               >
-                <AppIcon icon={AddSquareIcon} size={16} />
-                Import from Railway
+                <AppIcon icon={AddSquareIcon} size={14} />
+                <span className="hidden md:inline">Import Railway</span>
+                <span className="md:hidden">Import</span>
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 border border-[#4FB8B2]/50 bg-[#4FB8B2]/15 px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#4FB8B2] transition-colors hover:bg-[#4FB8B2]/25"
+                className="inline-flex h-9 items-center justify-center gap-2 border border-[#4FB8B2]/50 bg-[#4FB8B2]/15 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#4FB8B2] transition-colors hover:bg-[#4FB8B2]/25"
                 onClick={() => setCreateOpen(true)}
               >
-                <AppIcon icon={AddSquareIcon} size={16} />
-                New project
+                <AppIcon icon={AddSquareIcon} size={14} />
+                New
               </button>
               <button
                 type="button"
-                className="inline-flex h-[38px] w-[38px] items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
                 title="System Settings"
+                aria-label="System Settings"
                 onClick={() => setSettingsOpen(true)}
               >
-                <AppIcon icon={Settings01Icon} size={16} />
+                <AppIcon icon={Settings01Icon} size={15} />
               </button>
             </div>
           </header>
