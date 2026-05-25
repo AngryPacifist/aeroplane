@@ -214,6 +214,18 @@ async function ensureBuildkitAvailable(deploymentId: string) {
   throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
 }
 
+async function ensureRuntimeNetworkAvailable(deploymentId: string) {
+  const existing = await runBufferedCommand("docker", ["network", "inspect", config.runtimeNetworkName]);
+  if (existing.code === 0) return;
+
+  appendDeploymentLog(deploymentId, `Creating Docker runtime network ${config.runtimeNetworkName}.`);
+  await runCommand("docker", ["network", "create", config.runtimeNetworkName], deploymentId);
+}
+
+function runtimeNetworkArgs(service: Service) {
+  return ["--network", config.runtimeNetworkName, "--network-alias", service.slug];
+}
+
 function getEphemeralFreePort(): Promise<number> {
   return new Promise<number>((resolvePromise, reject) => {
     const server = net.createServer();
@@ -652,12 +664,23 @@ async function runDeployment(deployment: Deployment, service: Service) {
     try {
       appendDeploymentLog(deployment.id, `Pulling official image: ${officialImage}`);
       await runCommand("docker", ["pull", officialImage], deployment.id);
+      await ensureRuntimeNetworkAvailable(deployment.id);
 
       await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
         appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
       });
 
-      const dockerArgs = ["run", "-d", "--restart", "unless-stopped", "--name", containerName, "-p", `127.0.0.1:${service.hostPort}:${service.internalPort}`];
+      const dockerArgs = [
+        "run",
+        "-d",
+        "--restart",
+        "unless-stopped",
+        "--name",
+        containerName,
+        ...runtimeNetworkArgs(service),
+        "-p",
+        `127.0.0.1:${service.hostPort}:${service.internalPort}`
+      ];
       if (dbType === "clickhouse") {
         dockerArgs.push("--ulimit", "nofile=262144:262144");
       }
@@ -828,6 +851,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
     }
 
     // Allocate temporary ephemeral port for zero-downtime hot-swap
+    await ensureRuntimeNetworkAvailable(deployment.id);
     const tempPort = await getEphemeralFreePort();
     const tempContainerName = `${containerName}-${deployment.id}`;
     appendDeploymentLog(deployment.id, `Allocated ephemeral port ${tempPort} for zero-downtime container rollout.`);
@@ -839,6 +863,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       "unless-stopped",
       "--name",
       tempContainerName,
+      ...runtimeNetworkArgs(service),
       "-p",
       `127.0.0.1:${tempPort}:${service.internalPort}`
     ];

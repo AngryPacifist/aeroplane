@@ -391,35 +391,36 @@ function syncDatabaseUrlEnvVar(serviceId: string) {
 
   let urlKey = "DATABASE_URL";
   let urlValue = "";
-  const hostPort = service.hostPort;
+  const internalHost = service.slug;
+  const internalPort = service.internalPort;
 
   if (dbType === "postgres") {
     const user = envMap.get("POSTGRES_USER") || "postgres";
     const password = envMap.get("POSTGRES_PASSWORD") || "";
     const dbName = envMap.get("POSTGRES_DB") || "aeroplane";
     urlKey = "DATABASE_URL";
-    urlValue = `postgresql://${user}:${password}@127.0.0.1:${hostPort}/${dbName}`;
+    urlValue = `postgresql://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
   } else if (dbType === "mysql") {
     const user = envMap.get("MYSQL_USER") || "mysql";
     const password = envMap.get("MYSQL_PASSWORD") || "";
     const dbName = envMap.get("MYSQL_DATABASE") || "aeroplane";
     urlKey = "DATABASE_URL";
-    urlValue = `mysql://${user}:${password}@127.0.0.1:${hostPort}/${dbName}`;
+    urlValue = `mysql://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
   } else if (dbType === "redis") {
     const password = envMap.get("REDIS_PASSWORD") || "";
     urlKey = "REDIS_URL";
-    urlValue = password ? `redis://:${password}@127.0.0.1:${hostPort}` : `redis://127.0.0.1:${hostPort}`;
+    urlValue = password ? `redis://:${password}@${internalHost}:${internalPort}` : `redis://${internalHost}:${internalPort}`;
   } else if (dbType === "mongodb") {
     const user = envMap.get("MONGO_INITDB_ROOT_USERNAME") || "mongo";
     const password = envMap.get("MONGO_INITDB_ROOT_PASSWORD") || "";
     urlKey = "MONGODB_URI";
-    urlValue = `mongodb://${user}:${password}@127.0.0.1:${hostPort}/?authSource=admin`;
+    urlValue = `mongodb://${user}:${password}@${internalHost}:${internalPort}/?authSource=admin`;
   } else if (dbType === "clickhouse") {
     const user = envMap.get("CLICKHOUSE_USER") || "clickhouse";
     const password = envMap.get("CLICKHOUSE_PASSWORD") || "";
     const dbName = envMap.get("CLICKHOUSE_DB") || "aeroplane";
     urlKey = "CLICKHOUSE_URL";
-    urlValue = `clickhouse://${user}:${password}@127.0.0.1:${hostPort}/${dbName}`;
+    urlValue = `clickhouse://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
   }
 
   if (urlValue && envMap.get(urlKey) !== urlValue) {

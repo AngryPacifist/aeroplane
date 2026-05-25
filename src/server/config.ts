@@ -56,6 +56,7 @@ export const config = {
   buildkitHost: process.env.BUILDKIT_HOST ?? "tcp://127.0.0.1:1234",
   hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? 4100),
   hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? 4999),
+  runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? "aeroplane-runtime",
   caddyConfigPath: resolve(process.env.CADDY_CONFIG_PATH ?? "data/Caddyfile"),
   caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? "caddy reload --config ./data/Caddyfile",
   updateRepoUrl: process.env.AEROPLANE_UPDATE_REPO_URL ?? "https://github.com/akinloluwami/aeroplane.git",
