@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
@@ -36,7 +36,7 @@ export function renderCaddyfile() {
     })
     .from(domains)
     .innerJoin(services, eq(services.id, domains.serviceId))
-    .where(and(eq(domains.status, "active"), eq(services.status, "active")))
+    .where(and(eq(domains.status, "active"), inArray(services.status, ["active", "building"])))
     .all();
 
   const appServices = db
@@ -49,7 +49,7 @@ export function renderCaddyfile() {
       repoFullName: services.repoFullName
     })
     .from(services)
-    .where(eq(services.status, "active"))
+    .where(inArray(services.status, ["active", "building"]))
     .all()
     .filter((s) => {
       const isDatabase = s.repoUrl === "database" || (s.repoFullName?.startsWith("database:") ?? false);
@@ -94,6 +94,12 @@ export function renderCaddyfile() {
   reverse_proxy 127.0.0.1:${s.activePort}
 }`);
     }
+  }
+
+  if (blocks.length === 0) {
+    blocks.push(`http://127.0.0.1:65535 {
+  respond "No active Deploy routes." 404
+}`);
   }
 
   return [`# Managed by Deploy. Manual changes may be overwritten.`, ...blocks].join("\n\n") + "\n";
