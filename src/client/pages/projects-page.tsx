@@ -1,12 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
-import { AddSquareIcon, FolderCodeIcon, Globe02Icon, WorkflowSquare07Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon, FolderCodeIcon, Globe02Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api";
+import { BrandMark } from "../components/ui/brand-mark";
 import { AppIcon, FrameworkMark } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import { SystemSettingsModal } from "../components/modals/system-settings-modal";
+import { usePageTitle } from "../lib/page-title";
 
 function ServiceCluster({ project }: { project: ProjectCard }) {
   const previewServices = project.services.slice(0, 7);
@@ -40,6 +42,8 @@ function ServiceCluster({ project }: { project: ProjectCard }) {
 
 export function ProjectsPage() {
   const navigate = useNavigate();
+  usePageTitle("Projects");
+
   const [projects, setProjects] = useState<ProjectCard[]>([]);
   const [tools, setTools] = useState<ToolCheck[]>([]);
   const [githubStatus, setGitHubStatus] = useState<null | GitHubStatus>(null);
@@ -87,10 +91,10 @@ export function ProjectsPage() {
           <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/90 pb-5 font-mono text-[11px] text-zinc-500">
             <div className="flex items-center gap-3">
               <div className="grid h-11 w-11 place-items-center border border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#4FB8B2]">
-                <AppIcon icon={WorkflowSquare07Icon} size={18} />
+                <BrandMark />
               </div>
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600">Deploy registry</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600">Aeroplane registry</div>
                 <div className="font-hero text-lg tracking-tight text-zinc-100">Projects</div>
               </div>
             </div>
@@ -145,7 +149,7 @@ export function ProjectsPage() {
                 </div>
                 <h2 className="mt-6 font-hero text-3xl font-extrabold tracking-tight text-zinc-100">No projects yet</h2>
                 <p className="mt-3 max-w-lg font-mono text-sm leading-relaxed text-zinc-500">
-                  Create a project first, then attach services inside it. Each service gets its own deploy timeline, runtime logs, variables, and domains.
+                  Create a project first, then attach services inside it. Each service gets its own deployment timeline, runtime logs, variables, and domains.
                 </p>
                 <button
                   type="button"
