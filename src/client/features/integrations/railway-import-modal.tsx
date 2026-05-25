@@ -11,7 +11,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { api } from "../../api";
 import { ModalShell } from "../../components/modals/modal-shell";
-import { AppIcon, FieldLabel, FormInput, shellButton } from "../../components/ui/primitives";
+import { AppIcon, FieldLabel, FormInput, FormSelect, shellButton } from "../../components/ui/primitives";
 
 interface RailwayProject {
   id: string;
@@ -28,7 +28,7 @@ interface RailwayImportModalProps {
 
 export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportModalProps) {
   const navigate = useNavigate();
-  const [step, setStep] = useState<"auth" | "select" | "importing" | "success">("auth");
+  const [step, setStep] = useState<"auth" | "select" | "configure" | "importing" | "success">("auth");
   const [apiToken, setApiToken] = useState("");
   const [projects, setProjects] = useState<RailwayProject[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -40,6 +40,16 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // Configuration step states
+  const [projectDetails, setProjectDetails] = useState<{
+    services: Array<{ id: string; name: string }>;
+    environments: Array<{ id: string; name: string }>;
+  } | null>(null);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>("");
+  const [excludeRailwayVars, setExcludeRailwayVars] = useState(true);
+  const [importDatabases, setImportDatabases] = useState(true);
 
   useEffect(() => {
     if (open) {
@@ -77,19 +87,48 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
     }
   }
 
-  async function handleImport(project: RailwayProject) {
+  async function handleSelectProject(project: RailwayProject) {
     setSelectedProject(project);
+    setBusy(true);
+    setError("");
+    try {
+      const data = await api.railwayProjectDetails(apiToken.trim(), project.id);
+      const details = data.details;
+      setProjectDetails(details);
+      
+      // Initialize defaults
+      setSelectedServiceIds(details.services.map(s => s.id));
+      setSelectedEnvironmentId(details.environments[0]?.id || "");
+      setExcludeRailwayVars(true);
+      setImportDatabases(true);
+      
+      setStep("configure");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load project details");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleExecuteImport() {
+    if (!selectedProject) return;
     setStep("importing");
     setBusy(true);
     setError("");
     try {
-      const result = await api.railwayImport(apiToken.trim(), project.id);
+      const config = {
+        environmentId: selectedEnvironmentId,
+        excludeRailwayVars,
+        importDatabases,
+        selectedServiceIds
+      };
+      const result = await api.railwayImport(apiToken.trim(), selectedProject.id, config);
       setImportedSlug(result.projectSlug);
       setStep("success");
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Migration failed");
-      setStep("select");
+      setStep("configure");
     } finally {
       setBusy(false);
     }
@@ -103,6 +142,9 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
     setSelectedProject(null);
     setImportedSlug("");
     setError("");
+    setProjectDetails(null);
+    setSelectedServiceIds([]);
+    setSelectedEnvironmentId("");
     onClose();
   }
 
@@ -111,6 +153,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
       ? Settings01Icon
       : step === "select"
       ? Search01Icon
+      : step === "configure"
+      ? Settings01Icon
       : step === "importing"
       ? WorkflowSquare07Icon
       : CheckmarkCircle02Icon;
@@ -126,6 +170,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
           ? "Step 1: Authenticate"
           : step === "select"
           ? "Step 2: Choose Project"
+          : step === "configure"
+          ? "Step 3: Configure Migration"
           : step === "importing"
           ? "Migration In Progress"
           : "Migration Complete"
@@ -235,10 +281,10 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
                     <button
                       type="button"
                       className="inline-flex items-center justify-center gap-2 border border-[#E93D82]/50 bg-[#E93D82]/12 px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-wider text-[#E93D82] transition hover:bg-[#E93D82]/20"
-                      onClick={() => void handleImport(project)}
+                      onClick={() => void handleSelectProject(project)}
                       disabled={busy}
                     >
-                      Import ({project.serviceCount} service{project.serviceCount === 1 ? "" : "s"})
+                      Configure Import
                     </button>
                   </div>
                 ))
@@ -255,6 +301,133 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
             >
               <AppIcon icon={ArrowLeft01Icon} size={16} />
               Back
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === "configure" && projectDetails && (
+        <div className="flex flex-col min-h-full space-y-4">
+          <div className="text-sm text-zinc-300 leading-relaxed mb-1">
+            Customize how <strong>{selectedProject?.name}</strong> is migrated to your self-hosted stack.
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <FieldLabel>Target Environment</FieldLabel>
+              <FormSelect
+                value={selectedEnvironmentId}
+                onChange={(e) => setSelectedEnvironmentId(e.target.value)}
+                disabled={busy}
+              >
+                {projectDetails.environments.map((env) => (
+                  <option key={env.id} value={env.id}>
+                    {env.name}
+                  </option>
+                ))}
+              </FormSelect>
+              <div className="text-[10px] text-zinc-500 font-mono mt-1 uppercase tracking-wider">
+                Pull variables from this env
+              </div>
+            </div>
+
+            <div className="flex flex-col justify-end space-y-2.5 pb-1">
+              <label className="flex items-center gap-2 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={excludeRailwayVars}
+                  onChange={(e) => setExcludeRailwayVars(e.target.checked)}
+                  disabled={busy}
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
+                />
+                <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
+                  Exclude RAILWAY_* variables
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={importDatabases}
+                  onChange={(e) => setImportDatabases(e.target.checked)}
+                  disabled={busy}
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
+                />
+                <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
+                  Migrate database engines
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <FieldLabel>Services to Import ({selectedServiceIds.length} selected)</FieldLabel>
+            <div className="border border-zinc-700 bg-zinc-900/85 overflow-hidden">
+              <div className="max-h-[160px] overflow-y-auto divide-y divide-zinc-800">
+                {projectDetails.services.map((service) => {
+                  const isChecked = selectedServiceIds.includes(service.id);
+                  const lowercase = service.name.toLowerCase();
+                  const isDb = lowercase.includes("postgres") || lowercase.includes("mysql") || lowercase.includes("redis") || lowercase.includes("mongo");
+                  
+                  return (
+                    <label
+                      key={service.id}
+                      className="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/40 cursor-pointer select-none transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            if (isChecked) {
+                              setSelectedServiceIds(selectedServiceIds.filter(id => id !== service.id));
+                            } else {
+                              setSelectedServiceIds([...selectedServiceIds, service.id]);
+                            }
+                          }}
+                          disabled={busy}
+                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
+                        />
+                        <span className="text-xs font-semibold text-zinc-100 font-mono">{service.name}</span>
+                      </div>
+                      <span className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${
+                        isDb 
+                          ? "border-[#4FB8B2]/30 bg-[#4FB8B2]/5 text-[#4FB8B2]" 
+                          : "border-purple-500/30 bg-purple-500/5 text-purple-400"
+                      }`}>
+                        {isDb ? "Database" : "App Service"}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="border border-rose-500/35 bg-rose-950/20 px-4 py-3 text-xs text-rose-300 font-mono">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-between gap-3 border-t border-zinc-800 pt-4 mt-5">
+            <button
+              type="button"
+              className={shellButton("ghost")}
+              onClick={() => setStep("select")}
+              disabled={busy}
+            >
+              <AppIcon icon={ArrowLeft01Icon} size={16} />
+              Back
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 border border-[#E93D82]/50 bg-[#E93D82]/15 px-5 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-[#E93D82] transition hover:bg-[#E93D82]/25 disabled:opacity-60"
+              onClick={handleExecuteImport}
+              disabled={busy || selectedServiceIds.length === 0}
+            >
+              <AppIcon icon={Globe02Icon} size={16} />
+              Start Migration
             </button>
           </div>
         </div>
