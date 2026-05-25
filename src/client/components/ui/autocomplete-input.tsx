@@ -125,7 +125,10 @@ export function AutocompleteInput({
   }
 
   return (
-    <div className="relative w-full">
+    <div
+      className="relative w-full transition-[margin-bottom] duration-200 ease-in-out"
+      style={{ marginBottom: isOpen && filtered.length > 0 ? "250px" : "0px" }}
+    >
       <FormInput
         {...props}
         ref={inputRef}
