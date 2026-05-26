@@ -182,7 +182,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
       {step === "auth" && (
         <div className="space-y-5">
           <div className="text-sm text-zinc-300 leading-relaxed">
-            Migrate your entire Railway stack to your self-hosted Aeroplane control plane in seconds. All services, environment variables, database engines, and configurations will be imported natively.
+            Migrate your Railway stack to your self-hosted Aeroplane control plane. App variables are imported, while database engines are recreated with fresh Aeroplane-managed credentials.
           </div>
 
           <div>
@@ -327,7 +327,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
                 ))}
               </FormSelect>
               <div className="text-[10px] text-zinc-500 font-mono mt-1 uppercase tracking-wider">
-                Pull variables from this env
+                Pull app variables from this env
               </div>
             </div>
 
@@ -354,7 +354,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
                   className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
                 />
                 <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
-                  Migrate database engines
+                  Recreate database engines
                 </span>
               </label>
             </div>
@@ -449,8 +449,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
             <div className="absolute inset-y-0 bg-gradient-to-r from-[#E93D82] to-[#7871FF] w-1/2 rounded-full animate-marquee" />
           </div>
           <div className="text-[10px] text-zinc-500 font-mono space-y-1">
-            <div>Fetching services and variable maps...</div>
-            <div>Configuring self-hosted database containers...</div>
+            <div>Fetching services and app variable maps...</div>
+            <div>Generating self-hosted database credentials...</div>
             <div>Generating transparent Caddy reverse proxies...</div>
           </div>
         </div>
@@ -464,7 +464,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
           <div>
             <h3 className="font-hero text-xl font-bold text-zinc-100">Migration Completed!</h3>
             <p className="text-sm text-zinc-300 max-w-sm mt-2">
-              Successfully migrated all services, environment configurations, and databases from "{selectedProject?.name}" into your local stack.
+              Successfully migrated services, app variables, and recreated databases from "{selectedProject?.name}" into your local stack.
             </p>
           </div>
 
