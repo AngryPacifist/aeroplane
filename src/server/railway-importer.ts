@@ -5,6 +5,35 @@ import { services, envVars, projectGroups } from "./schema.js";
 import { allocateHostPort } from "./deploy.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { buildDatabaseConnectionUrl, defaultDatabasePort, generatedDatabaseEnvVars, normalizeDatabaseType } from "./database-urls.js";
+import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
+
+type GraphQLTypeRef = {
+  kind?: string | null;
+  name?: string | null;
+  ofType?: GraphQLTypeRef | null;
+};
+
+type GraphQLField = {
+  name: string;
+  type?: GraphQLTypeRef | null;
+};
+
+type RailwayServiceSourceInfo = {
+  repo?: string;
+  image?: string;
+  rootDirectory?: string;
+  installCommand?: string;
+  buildCommand?: string;
+  startCommand?: string;
+  staticOutput?: string;
+};
+
+const optionalServiceInstanceFields = [
+  "installCommand",
+  "staticOutput",
+  "outputDirectory",
+  "publishDirectory"
+] as const;
 
 async function fetchRailwayGraphQL(token: string, query: string, variables: any = {}) {
   const res = await fetch("https://backboard.railway.app/graphql/v2", {
@@ -26,6 +55,72 @@ async function fetchRailwayGraphQL(token: string, query: string, variables: any 
   }
 
   return body.data;
+}
+
+function unwrapGraphQLType(type?: GraphQLTypeRef | null): GraphQLTypeRef | null {
+  let current = type ?? null;
+  while (current?.ofType) {
+    current = current.ofType;
+  }
+  return current;
+}
+
+function isScalarGraphQLField(field: GraphQLField) {
+  const type = unwrapGraphQLType(field.type);
+  return type?.kind === "SCALAR" || type?.kind === "ENUM";
+}
+
+async function getServiceInstanceFieldSet(token: string) {
+  const query = `
+    query ServiceInstanceFields {
+      __type(name: "ServiceInstance") {
+        fields {
+          name
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const data = await fetchRailwayGraphQL(token, query);
+    const fields = (data?.__type?.fields ?? []) as GraphQLField[];
+    return new Set(fields.filter(isScalarGraphQLField).map((field) => field.name));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function optionalServiceInstanceSelection(fieldSet: Set<string>) {
+  return optionalServiceInstanceFields
+    .filter((field) => fieldSet.has(field))
+    .map((field) => `                    ${field}`)
+    .join("\n");
+}
+
+function cleanOptionalString(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function firstOptionalString(node: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = cleanOptionalString(node[key]);
+    if (value) return value;
+  }
+  return undefined;
 }
 
 export async function getRailwayProjects(token: string) {
@@ -125,6 +220,8 @@ export interface ImportConfig {
 }
 
 export async function importRailwayProject(token: string, railwayProjectId: string, config: ImportConfig) {
+  const serviceInstanceFields = await getServiceInstanceFieldSet(token);
+  const serviceInstanceCommandSelection = optionalServiceInstanceSelection(serviceInstanceFields);
   const projectQuery = `
     query GetRailwayProjectDetails($id: String!) {
       project(id: $id) {
@@ -161,6 +258,9 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
                       image
                     }
                     rootDirectory
+                    buildCommand
+                    startCommand
+${serviceInstanceCommandSelection}
                   }
                 }
               }
@@ -187,7 +287,7 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
   const targetEnvId = targetEnvNode?.id;
 
   // Build serviceSourceMap from serviceInstances of the target environment
-  const serviceSourceMap = new Map<string, { repo?: string; image?: string; rootDirectory?: string }>();
+  const serviceSourceMap = new Map<string, RailwayServiceSourceInfo>();
   if (targetEnvNode) {
     const instancesEdges = targetEnvNode.serviceInstances?.edges ?? [];
     for (const edge of instancesEdges) {
@@ -196,7 +296,11 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
         serviceSourceMap.set(node.serviceId, {
           repo: node.source?.repo || undefined,
           image: node.source?.image || undefined,
-          rootDirectory: node.rootDirectory || undefined
+          rootDirectory: cleanOptionalString(node.rootDirectory),
+          installCommand: cleanOptionalString(node.installCommand),
+          buildCommand: cleanOptionalString(node.buildCommand),
+          startCommand: cleanOptionalString(node.startCommand),
+          staticOutput: firstOptionalString(node, ["staticOutput", "outputDirectory", "publishDirectory"])
         });
       }
     }
@@ -240,6 +344,10 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
     let isDatabase = false;
 
     let rootDir: string | null = null;
+    let installCommand: string | null = null;
+    let buildCommand: string | null = null;
+    let startCommand: string | null = null;
+    let staticOutput: string | null = null;
 
     // 1. Resolve from repoTriggers if available
     const triggersEdges = sNode.repoTriggers?.edges ?? [];
@@ -258,6 +366,10 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
       if (sourceInfo.rootDirectory) {
         rootDir = sourceInfo.rootDirectory;
       }
+      installCommand = sourceInfo.installCommand ?? null;
+      buildCommand = sourceInfo.buildCommand ?? null;
+      startCommand = sourceInfo.startCommand ?? null;
+      staticOutput = sourceInfo.staticOutput ?? null;
       if (sourceInfo.repo && !repoUrl) {
         repoFullName = sourceInfo.repo.replace("https://github.com/", "").replace(/\.git$/, "");
         repoUrl = sourceInfo.repo.startsWith("http") ? sourceInfo.repo : `https://github.com/${sourceInfo.repo}`;
@@ -357,10 +469,10 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
       rootDir,
       githubToken: null,
       webhookSecret: nanoid(24),
-      installCommand: null,
-      buildCommand: null,
-      startCommand: null,
-      staticOutput: null,
+      installCommand: isDatabase ? null : installCommand,
+      buildCommand: isDatabase ? null : buildCommand,
+      startCommand: isDatabase ? null : startCommand,
+      staticOutput: isDatabase ? null : staticOutput,
       internalPort,
       hostPort,
       activePort: null,
@@ -400,6 +512,8 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
       }).run();
     }
   }
+
+  syncProjectDatabaseConnectionEnv(projectGroupId);
 
   // Trigger Caddy reload to map services
   await writeAndReloadCaddy();
