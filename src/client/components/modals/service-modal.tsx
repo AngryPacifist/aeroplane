@@ -519,6 +519,13 @@ export function ServiceModal({
 
   const service = overview?.service;
   const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
+  const visibleTabs = ([
+    ["deployments", PackageIcon],
+    ["logs", WorkflowSquare07Icon],
+    ["environment", Settings01Icon],
+    ["domains", Globe02Icon],
+    ["settings", GithubIcon]
+  ] as Array<[ModalTab, unknown]>).filter(([tab]) => !isDatabase || tab !== "domains");
   const deployments = overview?.deployments ?? [];
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
@@ -527,6 +534,12 @@ export function ServiceModal({
     activeDeployment && (activeDeployment.status === "queued" || activeDeployment.status === "building")
       ? formatBuildDuration(activeDeployment.startedAt ?? activeDeployment.createdAt, activeDeployment.finishedAt, nowMs)
       : null;
+
+  useEffect(() => {
+    if (isDatabase && selectedTab === "domains") {
+      onTabChange("deployments");
+    }
+  }, [isDatabase, onTabChange, selectedTab]);
 
   return (
     <>
@@ -588,13 +601,7 @@ export function ServiceModal({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {([
-                ["deployments", PackageIcon],
-                ["logs", WorkflowSquare07Icon],
-                ["environment", Settings01Icon],
-                ["domains", Globe02Icon],
-                ["settings", GithubIcon]
-              ] as Array<[ModalTab, unknown]>).map(([tab, icon]) => (
+              {visibleTabs.map(([tab, icon]) => (
                 <button key={tab} type="button" className={chipClass(selectedTab === tab)} onClick={() => onTabChange(tab)}>
                   <AppIcon icon={icon} size={15} />
                   <span className="capitalize">{tab}</span>
@@ -780,7 +787,7 @@ export function ServiceModal({
                 </div>
               ) : null}
 
-              {selectedTab === "domains" ? (
+              {selectedTab === "domains" && !isDatabase ? (
                 <div className="space-y-6">
                   {/* Header row with Add button */}
                   <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/90 pb-5">
