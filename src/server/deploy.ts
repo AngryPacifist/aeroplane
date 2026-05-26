@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { ChildProcess, spawn } from "node:child_process";
 import net from "node:net";
@@ -356,60 +356,6 @@ async function probeContainerStartup(port: number, containerName: string, timeou
   throw new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`);
 }
 
-function escapeDockerEnvValue(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function normalizeEnvValue(value: string) {
-  const trimmed = value.trim();
-  if (
-    trimmed.length >= 2 &&
-    ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'")))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function createCustomDockerfile({
-  installCommand,
-  buildCommand,
-  startCommand,
-  internalPort,
-  looksLikeBunProject,
-  buildEnvKeys
-}: {
-  installCommand: string;
-  buildCommand: string;
-  startCommand: string;
-  internalPort: number;
-  looksLikeBunProject: boolean;
-  buildEnvKeys: string[];
-}) {
-  const baseImage = looksLikeBunProject ? "oven/bun:1" : "node:22";
-  const lines = [
-    `FROM ${baseImage} AS build`,
-    "WORKDIR /app",
-    "COPY . /app"
-  ];
-
-  for (const key of buildEnvKeys) {
-    lines.push(`ARG ${key}`);
-    lines.push(`ENV ${key}=$${key}`);
-  }
-
-  if (installCommand) lines.push(`RUN ${installCommand}`);
-  if (buildCommand) lines.push(`RUN ${buildCommand}`);
-
-  lines.push(`FROM ${baseImage}`);
-  lines.push("WORKDIR /app");
-  lines.push(`ENV PORT=\"${escapeDockerEnvValue(String(internalPort))}\"`);
-  lines.push("COPY --from=build /app /app");
-  lines.push(`CMD ${JSON.stringify(["sh", "-lc", startCommand])}`);
-
-  return `${lines.join("\n")}\n`;
-}
-
 function packageManagerFromPackageJson(sourceDir: string) {
   const packageJsonPath = join(sourceDir, "package.json");
   if (!existsSync(packageJsonPath)) return null;
@@ -438,16 +384,6 @@ function detectPackageManager(sourceDir: string, commands: string[]) {
   if (existsSync(join(sourceDir, "pnpm-lock.yaml"))) return "pnpm";
   if (existsSync(join(sourceDir, "yarn.lock"))) return "yarn";
   return "npm";
-}
-
-function defaultInstallCommand(sourceDir: string, packageManager: string) {
-  if (!existsSync(join(sourceDir, "package.json"))) return "";
-
-  if (packageManager === "bun") return "bun install --frozen-lockfile";
-  if (packageManager === "pnpm") return "corepack enable && pnpm install --frozen-lockfile";
-  if (packageManager === "yarn") return "corepack enable && yarn install --immutable";
-  if (existsSync(join(sourceDir, "package-lock.json")) || existsSync(join(sourceDir, "npm-shrinkwrap.json"))) return "npm ci";
-  return "npm install";
 }
 
 function getEnvForService(serviceId: string) {
@@ -775,10 +711,9 @@ async function runDeployment(deployment: Deployment, service: Service) {
     const buildCommand = service.buildCommand ?? "";
     const startCommand = service.startCommand ?? "";
     const packageManager = detectPackageManager(sourceDir, [savedInstallCommand, buildCommand, startCommand]);
-    const installCommand = savedInstallCommand || (buildCommand ? defaultInstallCommand(sourceDir, packageManager) : "");
-    const hasCustomCommands = Boolean(installCommand || buildCommand || startCommand);
+    const installCommand = savedInstallCommand;
+    const hasCommandOverrides = Boolean(installCommand || buildCommand || startCommand);
     const looksLikeBunProject = packageManager === "bun";
-    const customDockerfilePath = join(buildRoot, "Dockerfile.custom");
     const isStaticService = Boolean(service.staticOutput?.trim());
 
     const railpackEnv: Record<string, string> = {
@@ -805,8 +740,6 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
     if (savedInstallCommand) {
       appendDeploymentLog(deployment.id, `Using custom install command: ${installCommand}`, "system", secrets);
-    } else if (installCommand) {
-      appendDeploymentLog(deployment.id, `Using auto install command: ${installCommand}`, "system", secrets);
     }
     if (buildCommand) {
       appendDeploymentLog(deployment.id, `Using custom build command: ${buildCommand}`, "system", secrets);
@@ -815,39 +748,23 @@ async function runDeployment(deployment: Deployment, service: Service) {
       appendDeploymentLog(deployment.id, `Using custom start command: ${startCommand}`, "system", secrets);
     }
 
-    if (hasCustomCommands) {
-      const dockerfile = createCustomDockerfile({
-        installCommand,
-        buildCommand,
-        startCommand: startCommand || "node server.js",
-        internalPort: service.internalPort,
-        looksLikeBunProject,
-        buildEnvKeys: Object.keys(env)
-      });
-      writeFileSync(customDockerfilePath, dockerfile);
-      appendDeploymentLog(deployment.id, `Using generated Dockerfile for custom commands (${looksLikeBunProject ? "bun" : "node"}).`);
-      const dockerBuildArgs = ["build", "-t", imageTag, "-f", customDockerfilePath];
-      for (const [key, value] of Object.entries(env)) {
-        dockerBuildArgs.push("--build-arg", `${key}=${value}`);
-      }
-      dockerBuildArgs.push(sourceDir);
-      await runCommand("docker", dockerBuildArgs, deployment.id, { redact: secrets });
-    } else {
-      await ensureBuildkitAvailable(deployment.id);
-      await runCommand(
-        "railpack",
-        ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id, appDir],
-        deployment.id,
-        { env: railpackEnv, redact: secrets }
-      );
+    if (hasCommandOverrides) {
+      appendDeploymentLog(deployment.id, "Applying command overrides through Railpack.");
     }
+    await ensureBuildkitAvailable(deployment.id);
+    await runCommand(
+      "railpack",
+      ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id, appDir],
+      deployment.id,
+      { env: railpackEnv, redact: secrets }
+    );
 
     if (isStaticService) {
       await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
         appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
       });
 
-      await exportStaticSiteFromImage(deployment, service, imageTag, hasCustomCommands);
+      await exportStaticSiteFromImage(deployment, service, imageTag, false);
 
       const deployedAt = now();
       supersedeRunningDeployments(service.id);
