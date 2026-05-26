@@ -21,6 +21,8 @@ export type Service = {
   staticOutput: null | string;
   internalPort: number;
   hostPort: number;
+  databasePublicEnabled: boolean;
+  databasePublicHostname: null | string;
   status: string;
   reachable: boolean;
   localUrl: string;

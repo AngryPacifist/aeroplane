@@ -20,6 +20,7 @@ import { getRailwayProjects, getRailwayProjectDetails, importRailwayProject } fr
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
 import { branchFromGitRef, verifyGitHubSignature } from "./github.js";
 import { subscribeToDeploymentLogs } from "./logBus.js";
+import { buildDatabaseConnectionUrl, databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import {
   deploymentLogs,
   deployments,
@@ -58,6 +59,12 @@ const repoFullNameSchema = z.string().trim().refine((value) => {
 }, {
   message: "Choose a GitHub repository or database engine"
 });
+const hostnameRegex = /^[a-z0-9.-]+\.[a-z]{2,}$|^[a-z0-9-]+\.localhost$/;
+const publicHostnameSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return undefined;
+  const hostname = value.trim().toLowerCase();
+  return hostname || undefined;
+}, z.string().regex(hostnameRegex, "Use a valid hostname like db.example.com").optional());
 
 const serviceSettingsSchema = z.object({
   name: z.string().trim().min(1),
@@ -70,7 +77,9 @@ const serviceSettingsSchema = z.object({
   buildCommand: optionalString,
   startCommand: optionalString,
   staticOutput: optionalString,
-  internalPort: z.coerce.number().int().min(1).max(65535).default(8080)
+  internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
+  databasePublicEnabled: z.boolean().optional().default(false),
+  databasePublicHostname: publicHostnameSchema
 });
 
 const createProjectSchema = z.object({
@@ -101,10 +110,12 @@ const updateServiceSchema = z.object({
   buildCommand: optionalString.nullish(),
   startCommand: optionalString.nullish(),
   staticOutput: optionalString.nullish(),
-  internalPort: z.coerce.number().int().min(1).max(65535).optional()
+  internalPort: z.coerce.number().int().min(1).max(65535).optional(),
+  databasePublicEnabled: z.boolean().optional(),
+  databasePublicHostname: publicHostnameSchema
 });
 const domainSchema = z.object({
-  hostname: z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$|^[a-z0-9-]+\.localhost$/)
+  hostname: z.string().trim().toLowerCase().regex(hostnameRegex)
 });
 
 const searchSchema = z.object({
@@ -229,10 +240,6 @@ function urlForHostname(hostname: string) {
   return `${isLocal ? "http" : "https"}://${hostname}`;
 }
 
-function isDatabaseService(service: Pick<Service, "repoUrl" | "repoFullName">) {
-  return service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
-}
-
 async function publicService(service: Service) {
   const isDatabase = isDatabaseService(service);
   const localUrl = isDatabase ? "" : `http://127.0.0.1:${service.hostPort}`;
@@ -273,6 +280,8 @@ async function publicService(service: Service) {
     staticOutput: service.staticOutput,
     internalPort: service.internalPort,
     hostPort: service.hostPort,
+    databasePublicEnabled: Boolean(service.databasePublicEnabled),
+    databasePublicHostname: service.databasePublicHostname,
     status: liveStatus,
     reachable,
     localUrl,
@@ -317,6 +326,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
   const timestamp = nowIso();
   const serviceSlug = createUniqueSlug(input.name, getServiceSlugSet(projectId));
   const repoUrl = input.repoUrl ?? repoUrlFromFullName(input.repoFullName);
+  const isDatabase = repoUrl === "database" || input.repoFullName.startsWith("database:");
 
   const service: Service = {
     id: nanoid(10),
@@ -336,6 +346,8 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
     internalPort: input.internalPort,
     hostPort: allocateHostPort(),
     activePort: null,
+    databasePublicEnabled: isDatabase ? input.databasePublicEnabled : false,
+    databasePublicHostname: isDatabase && input.databasePublicEnabled ? input.databasePublicHostname ?? null : null,
     status: "idle",
     lastDeployedAt: null,
     createdAt: timestamp,
@@ -387,63 +399,63 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
 function syncDatabaseUrlEnvVar(serviceId: string) {
   const service = getServiceById(serviceId);
   if (!service) return;
-  const isDatabase = service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
-  if (!isDatabase) return;
+  if (!isDatabaseService(service)) return;
 
-  const dbType = service.repoFullName?.split(":")[1] || "postgres";
+  const dbType = databaseTypeForService(service);
   const envs = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
   const envMap = new Map(envs.map(row => [row.key, row.value]));
+  const privateUrl = buildDatabaseConnectionUrl({
+    dbType,
+    envMap,
+    host: service.slug,
+    port: service.internalPort
+  });
 
-  let urlKey = "DATABASE_URL";
-  let urlValue = "";
-  const internalHost = service.slug;
-  const internalPort = service.internalPort;
-
-  if (dbType === "postgres") {
-    const user = envMap.get("POSTGRES_USER") || "postgres";
-    const password = envMap.get("POSTGRES_PASSWORD") || "";
-    const dbName = envMap.get("POSTGRES_DB") || "aeroplane";
-    urlKey = "DATABASE_URL";
-    urlValue = `postgresql://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
-  } else if (dbType === "mysql") {
-    const user = envMap.get("MYSQL_USER") || "mysql";
-    const password = envMap.get("MYSQL_PASSWORD") || "";
-    const dbName = envMap.get("MYSQL_DATABASE") || "aeroplane";
-    urlKey = "DATABASE_URL";
-    urlValue = `mysql://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
-  } else if (dbType === "redis") {
-    const password = envMap.get("REDIS_PASSWORD") || "";
-    urlKey = "REDIS_URL";
-    urlValue = password ? `redis://:${password}@${internalHost}:${internalPort}` : `redis://${internalHost}:${internalPort}`;
-  } else if (dbType === "mongodb") {
-    const user = envMap.get("MONGO_INITDB_ROOT_USERNAME") || "mongo";
-    const password = envMap.get("MONGO_INITDB_ROOT_PASSWORD") || "";
-    urlKey = "MONGODB_URI";
-    urlValue = `mongodb://${user}:${password}@${internalHost}:${internalPort}/?authSource=admin`;
-  } else if (dbType === "clickhouse") {
-    const user = envMap.get("CLICKHOUSE_USER") || "clickhouse";
-    const password = envMap.get("CLICKHOUSE_PASSWORD") || "";
-    const dbName = envMap.get("CLICKHOUSE_DB") || "aeroplane";
-    urlKey = "CLICKHOUSE_URL";
-    urlValue = `clickhouse://${user}:${password}@${internalHost}:${internalPort}/${dbName}`;
-  }
-
-  if (urlValue && envMap.get(urlKey) !== urlValue) {
+  if (envMap.get(privateUrl.key) !== privateUrl.value) {
     const timestamp = nowIso();
     db.insert(envVars)
       .values({
         id: nanoid(10),
         serviceId,
-        key: urlKey,
-        value: urlValue,
+        key: privateUrl.key,
+        value: privateUrl.value,
         createdAt: timestamp,
         updatedAt: timestamp
       })
       .onConflictDoUpdate({
         target: [envVars.serviceId, envVars.key],
-        set: { value: urlValue, updatedAt: timestamp }
+        set: { value: privateUrl.value, updatedAt: timestamp }
       })
       .run();
+  }
+
+  const publicUrl = service.databasePublicEnabled && service.databasePublicHostname
+    ? buildDatabaseConnectionUrl({
+        dbType,
+        envMap,
+        host: service.databasePublicHostname,
+        port: service.hostPort
+      }).value
+    : "";
+
+  if (publicUrl) {
+    const timestamp = nowIso();
+    db.insert(envVars)
+      .values({
+        id: nanoid(10),
+        serviceId,
+        key: "DATABASE_PUBLIC_URL",
+        value: publicUrl,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      })
+      .onConflictDoUpdate({
+        target: [envVars.serviceId, envVars.key],
+        set: { value: publicUrl, updatedAt: timestamp }
+      })
+      .run();
+  } else if (envMap.has("DATABASE_PUBLIC_URL")) {
+    db.delete(envVars).where(and(eq(envVars.serviceId, serviceId), eq(envVars.key, "DATABASE_PUBLIC_URL"))).run();
   }
 }
 
@@ -451,8 +463,7 @@ function syncAllExistingDatabaseUrls() {
   try {
     const allServices = db.select().from(services).all();
     for (const service of allServices) {
-      const isDatabase = service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
-      if (isDatabase) {
+      if (isDatabaseService(service)) {
         syncDatabaseUrlEnvVar(service.id);
       }
     }
@@ -601,6 +612,10 @@ app.post("/api/projects/:projectId/services", async (c) => {
   const body = createServiceSchema.safeParse(await c.req.json());
   if (!body.success) {
     return jsonError(body.error.issues[0]?.message ?? "Invalid service");
+  }
+
+  if (isDatabaseService({ repoUrl: body.data.repoUrl ?? repoUrlFromFullName(body.data.repoFullName), repoFullName: body.data.repoFullName }) && body.data.databasePublicEnabled && !body.data.databasePublicHostname) {
+    return jsonError("Public database hostname is required");
   }
 
   const service = createServiceRecord(project.id, body.data);
@@ -806,12 +821,26 @@ app.patch("/api/services/:serviceId", async (c) => {
         ? repoUrlFromFullName(repoFullName)
         : service.repoUrl
       : body.data.repoUrl ?? service.repoUrl;
+  const nextIsDatabase = isDatabaseService({ repoFullName, repoUrl });
+  const databasePublicEnabled = nextIsDatabase
+    ? body.data.databasePublicEnabled ?? service.databasePublicEnabled
+    : false;
+  const databasePublicHostname = nextIsDatabase && databasePublicEnabled
+    ? body.data.databasePublicHostname ?? service.databasePublicHostname
+    : null;
+
+  if (nextIsDatabase && databasePublicEnabled && !databasePublicHostname) {
+    return jsonError("Public database hostname is required");
+  }
+
   db.update(services)
     .set({
       ...body.data,
       repoFullName,
       repoUrl,
       githubToken: body.data.githubToken === undefined ? service.githubToken : body.data.githubToken ?? null,
+      databasePublicEnabled,
+      databasePublicHostname,
       updatedAt: nowIso()
     })
     .where(eq(services.id, service.id))

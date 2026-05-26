@@ -13,6 +13,8 @@ export type ServiceFormPayload = {
   buildCommand?: string;
   startCommand?: string;
   staticOutput?: string;
+  databasePublicEnabled?: boolean;
+  databasePublicHostname?: string;
   env?: Array<{
     key: string;
     value: string;

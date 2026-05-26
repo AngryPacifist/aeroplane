@@ -55,6 +55,7 @@ import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
 import type { ModalTab } from "./service-modal-types";
 import { EnvVarRow } from "./env-var-row";
+import { DatabaseServiceSettingsPanel } from "./database-service-settings-panel";
 
 function formatBuildDuration(startedAt: null | string, finishedAt: null | string, nowMs: number) {
   const start = startedAt ? Date.parse(startedAt) : Number.NaN;
@@ -196,7 +197,9 @@ export function ServiceModal({
     buildCommand: "",
     startCommand: "",
     staticOutput: "",
-    internalPort: 8080
+    internalPort: 8080,
+    databasePublicEnabled: false,
+    databasePublicHostname: ""
   });
   const [settingsBranches, setSettingsBranches] = useState<string[]>([]);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
@@ -234,7 +237,9 @@ export function ServiceModal({
           buildCommand: result.service.buildCommand ?? "",
           startCommand: result.service.startCommand ?? "",
           staticOutput: result.service.staticOutput ?? "",
-          internalPort: result.service.internalPort
+          internalPort: result.service.internalPort,
+          databasePublicEnabled: result.service.databasePublicEnabled,
+          databasePublicHostname: result.service.databasePublicHostname ?? ""
         });
         setError("");
       });
@@ -310,7 +315,7 @@ export function ServiceModal({
   }, [selectedTab, serviceId]);
 
   useEffect(() => {
-    if (selectedTab !== "settings" || !settings.repoFullName) return;
+    if (selectedTab !== "settings" || !settings.repoFullName || settings.repoFullName.startsWith("database:")) return;
     let cancelled = false;
 
     void (async () => {
@@ -455,7 +460,9 @@ export function ServiceModal({
         buildCommand: isDatabase ? undefined : (settings.buildCommand || undefined),
         startCommand: isDatabase ? undefined : (settings.startCommand || undefined),
         staticOutput: isDatabase ? undefined : (settings.staticOutput || undefined),
-        internalPort: Number(settings.internalPort)
+        internalPort: Number(settings.internalPort),
+        databasePublicEnabled: isDatabase ? settings.databasePublicEnabled : undefined,
+        databasePublicHostname: isDatabase && settings.databasePublicEnabled ? settings.databasePublicHostname : undefined
       });
     });
   }
@@ -541,7 +548,11 @@ export function ServiceModal({
                       {isDatabase ? (
                         <div className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
                           <AppIcon icon={CloudServerIcon} size={14} />
-                          <span className="truncate">Private database</span>
+                          <span className="truncate">
+                            {service?.databasePublicEnabled && service.databasePublicHostname
+                              ? `${service.databasePublicHostname}:${service.hostPort}`
+                              : "Private database"}
+                          </span>
                         </div>
                       ) : service?.preferredDomain ? (
                         <a
@@ -1080,14 +1091,11 @@ export function ServiceModal({
                   <div className="grid gap-5 xl:grid-cols-2">
                     {isDatabase ? (
                       <>
-                        <div>
-                          <FieldLabel>Service name</FieldLabel>
-                          <FormInput value={settings.name} onChange={(event) => setSettings({ ...settings, name: event.target.value })} />
-                        </div>
-                        <div>
-                          <FieldLabel>Database port (Internal)</FieldLabel>
-                          <FormInput type="number" value={settings.internalPort} onChange={(event) => setSettings({ ...settings, internalPort: Number(event.target.value) })} />
-                        </div>
+                        <DatabaseServiceSettingsPanel
+                          settings={settings}
+                          hostPort={service?.hostPort}
+                          onChange={(nextSettings) => setSettings({ ...settings, ...nextSettings })}
+                        />
                       </>
                     ) : (
                       <>
@@ -1201,7 +1209,11 @@ export function ServiceModal({
                       {isDatabase ? (
                         <div className="flex items-center gap-3 border border-zinc-700 bg-zinc-900/85 px-3 py-3 text-sm text-zinc-200">
                           <BrowserIconFallback size={17} />
-                          <span className="truncate">Connect at {window.location.hostname}:{service?.hostPort}</span>
+                          <span className="truncate">
+                            {service?.databasePublicEnabled && service.databasePublicHostname
+                              ? `Public TCP ${service.databasePublicHostname}:${service.hostPort}`
+                              : `Private TCP 127.0.0.1:${service?.hostPort}`}
+                          </span>
                         </div>
                       ) : service?.reachable ? (
                         <a

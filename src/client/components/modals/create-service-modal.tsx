@@ -375,6 +375,8 @@ export function CreateServiceModal({
     repoUrl: string;
     branch: string;
     internalPort: number;
+    databasePublicEnabled: boolean;
+    databasePublicHostname?: string;
     env: Array<{ key: string; value: string }>;
   }) {
     setBusy(true);
@@ -386,6 +388,8 @@ export function CreateServiceModal({
         repoUrl: payload.repoUrl,
         branch: payload.branch,
         internalPort: payload.internalPort,
+        databasePublicEnabled: payload.databasePublicEnabled,
+        databasePublicHostname: payload.databasePublicHostname,
         env: payload.env
       });
       onClose();

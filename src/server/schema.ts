@@ -27,6 +27,8 @@ export const services = sqliteTable("projects", {
   internalPort: integer("internal_port").notNull(),
   hostPort: integer("host_port").notNull(),
   activePort: integer("active_port"),
+  databasePublicEnabled: integer("database_public_enabled", { mode: "boolean" }).notNull().default(false),
+  databasePublicHostname: text("database_public_hostname"),
   status: text("status").notNull(),
   lastDeployedAt: text("last_deployed_at"),
   createdAt: text("created_at").notNull(),

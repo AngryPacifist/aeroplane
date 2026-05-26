@@ -1,7 +1,10 @@
 import { ArrowLeft01Icon, AddSquareIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useState } from "react";
+import { api } from "../../api";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
 import { getDatabaseOption, type DatabaseType, type EnvEntry } from "./database-service-options";
+import { DatabaseCredentialFields } from "./database-credential-fields";
+import { DatabasePublicAccessFields } from "./database-public-access-fields";
 
 interface DatabaseConfigureStepProps {
   dbType: DatabaseType;
@@ -12,6 +15,8 @@ interface DatabaseConfigureStepProps {
     repoUrl: string;
     branch: string;
     internalPort: number;
+    databasePublicEnabled: boolean;
+    databasePublicHostname?: string;
     env: EnvEntry[];
   }) => Promise<void>;
   busy: boolean;
@@ -26,11 +31,19 @@ function generateRandomPassword(): string {
   return pwd;
 }
 
+function slugifyHostnamePart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "database";
+}
+
 export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: DatabaseConfigureStepProps) {
   const [name, setName] = useState("");
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>([]);
   const [newEnvOpen, setNewEnvOpen] = useState(false);
   const [envForm, setEnvForm] = useState<EnvEntry>({ key: "", value: "" });
+  const [rootDomain, setRootDomain] = useState("");
+  const [publicEnabled, setPublicEnabled] = useState(false);
+  const [publicHostname, setPublicHostname] = useState("");
+  const [hostnameTouched, setHostnameTouched] = useState(false);
 
   const dbOption = getDatabaseOption(dbType);
   const defaultPort = dbOption.defaultPort;
@@ -65,7 +78,37 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
     }
 
     setEnvEntries(list);
+    setPublicEnabled(false);
+    setPublicHostname("");
+    setHostnameTouched(false);
   }, [dbType]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.systemSettings()
+      .then((result) => {
+        if (!cancelled) setRootDomain(result.settings.rootDomain);
+      })
+      .catch(() => {
+        if (!cancelled) setRootDomain("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!publicEnabled || hostnameTouched || !rootDomain) return;
+    setPublicHostname(`${slugifyHostnamePart(name)}.${rootDomain}`);
+  }, [hostnameTouched, name, publicEnabled, rootDomain]);
+
+  function updateEnvValue(key: string, value: string) {
+    setEnvEntries((current) => {
+      const next = new Map(current.map((entry) => [entry.key, entry.value]));
+      next.set(key, value);
+      return Array.from(next.entries()).map(([entryKey, entryValue]) => ({ key: entryKey, value: entryValue }));
+    });
+  }
 
   function addEnvEntry() {
     if (!envForm.key.trim()) return;
@@ -87,6 +130,8 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
       repoUrl: "database",
       branch: "main",
       internalPort: defaultPort,
+      databasePublicEnabled: publicEnabled,
+      databasePublicHostname: publicEnabled ? publicHostname.trim().toLowerCase() : undefined,
       env: envEntries
     });
   }
@@ -101,7 +146,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             </div>
             <div>
               <h4 className="text-sm font-semibold text-zinc-100">Deploying {dbLabel}</h4>
-              <p className="text-xs text-zinc-400">Exposing database engine on port {defaultPort}</p>
+              <p className="text-xs text-zinc-400">Private runtime hostname now, public hostname only if enabled.</p>
             </div>
           </div>
 
@@ -124,10 +169,35 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             </div>
           </div>
 
+          <DatabasePublicAccessFields
+            enabled={publicEnabled}
+            hostname={publicHostname}
+            rootDomain={rootDomain}
+            disabled={busy}
+            onEnabledChange={(enabled) => {
+              setPublicEnabled(enabled);
+              if (enabled && !publicHostname && rootDomain) {
+                setPublicHostname(`${slugifyHostnamePart(name)}.${rootDomain}`);
+                setHostnameTouched(false);
+              }
+            }}
+            onHostnameChange={(hostname) => {
+              setPublicHostname(hostname);
+              setHostnameTouched(true);
+            }}
+          />
+
+          <DatabaseCredentialFields
+            dbType={dbType}
+            entries={envEntries}
+            disabled={busy}
+            onChange={updateEnvValue}
+          />
+
           {/* Environment variables */}
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 border-b border-zinc-800 pb-2">
-              <span className="text-sm font-medium text-zinc-100">Database Credentials & Env Vars</span>
+              <span className="text-sm font-medium text-zinc-100">Advanced env vars</span>
               <button
                 type="button"
                 className={shellButton("secondary")}
@@ -217,7 +287,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
           <AppIcon icon={ArrowLeft01Icon} size={16} />
           Back
         </button>
-        <button type="submit" className={shellButton("primary")} disabled={busy || !name.trim()}>
+        <button type="submit" className={shellButton("primary")} disabled={busy || !name.trim() || (publicEnabled && !publicHostname.trim())}>
           <AppIcon icon={AddSquareIcon} size={16} />
           {busy ? "Deploying..." : "Deploy Database"}
         </button>

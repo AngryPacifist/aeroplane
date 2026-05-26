@@ -354,6 +354,8 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
       internalPort,
       hostPort,
       activePort: null,
+      databasePublicEnabled: false,
+      databasePublicHostname: null,
       status: "idle",
       lastDeployedAt: null,
       createdAt: timestamp,

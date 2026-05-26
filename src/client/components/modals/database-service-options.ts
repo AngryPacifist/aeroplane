@@ -13,6 +13,12 @@ export type EnvEntry = {
   value: string;
 };
 
+export type DatabaseCredentialField = {
+  key: string;
+  label: string;
+  placeholder: string;
+};
+
 export const DATABASE_OPTIONS: DatabaseOption[] = [
   {
     key: "postgres",
@@ -49,4 +55,42 @@ export const DATABASE_OPTIONS: DatabaseOption[] = [
 
 export function getDatabaseOption(dbType: DatabaseType) {
   return DATABASE_OPTIONS.find((option) => option.key === dbType) ?? DATABASE_OPTIONS[0];
+}
+
+export function getDatabaseCredentialFields(dbType: DatabaseType): DatabaseCredentialField[] {
+  if (dbType === "mysql") {
+    return [
+      { key: "MYSQL_DATABASE", label: "Database name", placeholder: "aeroplane" },
+      { key: "MYSQL_USER", label: "Username", placeholder: "mysql" },
+      { key: "MYSQL_PASSWORD", label: "Password", placeholder: "password" },
+      { key: "MYSQL_ROOT_PASSWORD", label: "Root password", placeholder: "root password" }
+    ];
+  }
+
+  if (dbType === "redis") {
+    return [
+      { key: "REDIS_PASSWORD", label: "Password", placeholder: "password" }
+    ];
+  }
+
+  if (dbType === "mongodb") {
+    return [
+      { key: "MONGO_INITDB_ROOT_USERNAME", label: "Root username", placeholder: "mongo" },
+      { key: "MONGO_INITDB_ROOT_PASSWORD", label: "Root password", placeholder: "password" }
+    ];
+  }
+
+  if (dbType === "clickhouse") {
+    return [
+      { key: "CLICKHOUSE_DB", label: "Database name", placeholder: "aeroplane" },
+      { key: "CLICKHOUSE_USER", label: "Username", placeholder: "clickhouse" },
+      { key: "CLICKHOUSE_PASSWORD", label: "Password", placeholder: "password" }
+    ];
+  }
+
+  return [
+    { key: "POSTGRES_DB", label: "Database name", placeholder: "aeroplane" },
+    { key: "POSTGRES_USER", label: "Username", placeholder: "postgres" },
+    { key: "POSTGRES_PASSWORD", label: "Password", placeholder: "password" }
+  ];
 }

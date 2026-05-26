@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS projects (
   internal_port INTEGER NOT NULL,
   host_port INTEGER NOT NULL UNIQUE,
   active_port INTEGER,
+  database_public_enabled INTEGER NOT NULL DEFAULT 0,
+  database_public_hostname TEXT,
   status TEXT NOT NULL,
   last_deployed_at TEXT,
   created_at TEXT NOT NULL,
@@ -114,6 +116,14 @@ if (!hasColumn("projects", "root_dir")) {
 
 if (!hasColumn("projects", "active_port")) {
   sqlite.exec("ALTER TABLE projects ADD COLUMN active_port INTEGER");
+}
+
+if (!hasColumn("projects", "database_public_enabled")) {
+  sqlite.exec("ALTER TABLE projects ADD COLUMN database_public_enabled INTEGER NOT NULL DEFAULT 0");
+}
+
+if (!hasColumn("projects", "database_public_hostname")) {
+  sqlite.exec("ALTER TABLE projects ADD COLUMN database_public_hostname TEXT");
 }
 
 sqlite.exec(`

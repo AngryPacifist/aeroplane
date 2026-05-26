@@ -11,6 +11,7 @@ import { deploymentLogs, deployments, envVars, services, type Deployment, type S
 import { writeAndReloadCaddy } from "./caddy.js";
 import { getCloneTokenForRepo } from "./github-connect.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
+import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 
 type RunOptions = {
   cwd?: string;
@@ -639,13 +640,13 @@ export function enqueueDeployment(serviceId: string, options: EnqueueOptions) {
 
 async function runDeployment(deployment: Deployment, service: Service) {
   const startedAt = now();
-  const isDatabase = service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
+  const isDatabase = isDatabaseService(service);
   const containerName = containerNameForService(service.id);
   const env = getEnvForService(service.id);
   const secrets = [...Object.values(env)].filter(Boolean);
 
   if (isDatabase) {
-    const dbType = service.repoFullName?.split(":")[1] || "postgres";
+    const dbType = databaseTypeForService(service);
     const officialImage =
       dbType === "postgres"
         ? "postgres:15-alpine"
@@ -676,6 +677,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
         appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
       });
 
+      const bindHost = service.databasePublicEnabled ? "0.0.0.0" : "127.0.0.1";
       const dockerArgs = [
         "run",
         "-d",
@@ -685,7 +687,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
         containerName,
         ...runtimeNetworkArgs(service),
         "-p",
-        `127.0.0.1:${service.hostPort}:${service.internalPort}`
+        `${bindHost}:${service.hostPort}:${service.internalPort}`
       ];
       if (dbType === "clickhouse") {
         dockerArgs.push("--ulimit", "nofile=262144:262144");
@@ -695,7 +697,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       }
       dockerArgs.push(officialImage);
 
-      appendDeploymentLog(deployment.id, `Running container mapping host port ${service.hostPort} to internal port ${service.internalPort}...`);
+      appendDeploymentLog(deployment.id, `Running container mapping ${bindHost}:${service.hostPort} to internal port ${service.internalPort}...`);
       await runCommand("docker", dockerArgs, deployment.id, { redact: secrets });
 
       const deployedAt = now();
@@ -705,7 +707,12 @@ async function runDeployment(deployment: Deployment, service: Service) {
         .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
         .where(eq(services.id, service.id))
         .run();
-      appendDeploymentLog(deployment.id, `Database successfully provisioned and listening on 127.0.0.1:${service.hostPort}!`);
+      if (service.databasePublicEnabled && service.databasePublicHostname) {
+        appendDeploymentLog(deployment.id, `Database successfully provisioned with public TCP access at ${service.databasePublicHostname}:${service.hostPort}.`);
+        appendDeploymentLog(deployment.id, `If a firewall is enabled, allow TCP ${service.hostPort} before connecting externally.`);
+      } else {
+        appendDeploymentLog(deployment.id, `Database successfully provisioned and listening privately on 127.0.0.1:${service.hostPort}.`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown database deployment error";
       appendDeploymentLog(deployment.id, `Database provisioning failed: ${message}`, "stderr", secrets);
