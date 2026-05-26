@@ -42,7 +42,7 @@ export function DatabasePublicAccessFields({
             Public TCP hostname
           </span>
           <span className="mt-1 block text-xs leading-5 text-zinc-400">
-            Off keeps the database private on the Aeroplane runtime network. On exposes the assigned host port and generates <code>DATABASE_PUBLIC_URL</code>.
+            Off keeps the database private on the Aeroplane runtime network. On exposes the assigned host port and generates the engine-specific <code>*_PUBLIC_URL</code>.
           </span>
         </span>
       </label>
