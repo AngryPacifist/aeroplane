@@ -1,6 +1,6 @@
-export type ModalTab = "deployments" | "logs" | "environment" | "domains" | "settings";
+export type ModalTab = "deployments" | "logs" | "environment" | "domains" | "data" | "sql" | "settings";
 
-export const modalTabs: ModalTab[] = ["deployments", "logs", "environment", "domains", "settings"];
+export const modalTabs: ModalTab[] = ["deployments", "logs", "environment", "domains", "data", "sql", "settings"];
 
 export type ServiceFormPayload = {
   name: string;
