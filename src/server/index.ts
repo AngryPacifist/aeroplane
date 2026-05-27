@@ -37,6 +37,14 @@ import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { getSystemSettings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
+import {
+  deleteDatabaseRow,
+  getDatabaseRows,
+  getDatabaseTables,
+  insertDatabaseRow,
+  runDatabaseQuery,
+  updateDatabaseRow
+} from "./database-console.js";
 
 const app = new Hono();
 
@@ -94,6 +102,22 @@ const updateProjectSchema = z.object({
 });
 
 const envSchema = z.object({ key: z.string().trim().regex(/^[A-Z_][A-Z0-9_]*$/i), value: z.string() });
+const databaseRowValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const databaseRowSchema = z.record(z.string(), databaseRowValueSchema);
+const databaseQuerySchema = z.object({ sql: z.string().trim().min(1) });
+const databaseInsertSchema = z.object({
+  table: z.string().trim().min(1),
+  values: databaseRowSchema
+});
+const databaseUpdateSchema = z.object({
+  table: z.string().trim().min(1),
+  primaryKey: databaseRowSchema,
+  values: databaseRowSchema
+});
+const databaseDeleteSchema = z.object({
+  table: z.string().trim().min(1),
+  primaryKey: databaseRowSchema
+});
 
 const createServiceSchema = serviceSettingsSchema.extend({
   name: z.string().trim().min(1),
@@ -121,7 +145,7 @@ const domainSchema = z.object({
 
 const searchSchema = z.object({
   service: z.string().optional(),
-  tab: z.enum(["deployments", "logs", "environment", "domains", "settings"]).optional()
+  tab: z.enum(["deployments", "logs", "environment", "domains", "data", "sql", "settings"]).optional()
 });
 
 function jsonError(message: string, status = 400) {
@@ -809,6 +833,79 @@ app.get("/api/services/:serviceId/suggestion-keys", async (c) => {
   }
 
   return c.json({ suggestions });
+});
+
+app.get("/api/services/:serviceId/database/tables", async (c) => {
+  try {
+    return c.json(await getDatabaseTables(c.req.param("serviceId")));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not load database tables", 400);
+  }
+});
+
+app.get("/api/services/:serviceId/database/rows", async (c) => {
+  try {
+    const table = c.req.query("table") ?? "";
+    if (!table) return jsonError("Table is required");
+
+    const limit = Number(c.req.query("limit") ?? 50);
+    const offset = Number(c.req.query("offset") ?? 0);
+    return c.json(await getDatabaseRows(c.req.param("serviceId"), table, limit, offset));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not load database rows", 400);
+  }
+});
+
+app.post("/api/services/:serviceId/database/query", async (c) => {
+  const body = databaseQuerySchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid SQL query");
+  }
+
+  try {
+    return c.json(await runDatabaseQuery(c.req.param("serviceId"), body.data.sql));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not run SQL query", 400);
+  }
+});
+
+app.post("/api/services/:serviceId/database/rows", async (c) => {
+  const body = databaseInsertSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid row");
+  }
+
+  try {
+    return c.json(await insertDatabaseRow(c.req.param("serviceId"), body.data.table, body.data.values), 201);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not insert database row", 400);
+  }
+});
+
+app.patch("/api/services/:serviceId/database/rows", async (c) => {
+  const body = databaseUpdateSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid row update");
+  }
+
+  try {
+    return c.json(await updateDatabaseRow(c.req.param("serviceId"), body.data.table, body.data.primaryKey, body.data.values));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not update database row", 400);
+  }
+});
+
+app.delete("/api/services/:serviceId/database/rows", async (c) => {
+  const body = databaseDeleteSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid row delete");
+  }
+
+  try {
+    return c.json(await deleteDatabaseRow(c.req.param("serviceId"), body.data.table, body.data.primaryKey));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not delete database row", 400);
+  }
 });
 
 app.patch("/api/services/:serviceId", async (c) => {
