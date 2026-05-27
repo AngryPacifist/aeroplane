@@ -18,7 +18,7 @@ type DatabaseTableGridProps = {
   busy: string;
   editingIndex: number | null;
   draftRow: Record<string, string>;
-  appliedFilterCount: number;
+  appliedFilters: DatabaseRowFilter[];
   onAddRecord: () => void;
   onBeginEdit: (index: number) => void;
   onCancelEdit: () => void;
@@ -57,7 +57,7 @@ export function DatabaseTableGrid({
   busy,
   editingIndex,
   draftRow,
-  appliedFilterCount,
+  appliedFilters,
   onAddRecord,
   onBeginEdit,
   onCancelEdit,
@@ -93,7 +93,9 @@ export function DatabaseTableGrid({
   const visibleColumns = useMemo(() => columns.filter((column) => !hiddenColumns.has(column.name)), [columns, hiddenColumns]);
   const visibleRows = useMemo(() => applyGridSort(rows.map((row, index) => ({ row, index })), sort), [rows, sort]);
   const selectedItems = useMemo<GridRowItem[]>(() => rows.map((row, index) => ({ row, index })).filter(({ index }) => selectedRows.has(index)), [rows, selectedRows]);
-  const activeFilterCount = filters.filter(isActiveFilter).length;
+  const draftFilters = filters.filter(isActiveFilter).map(({ column, operator, value }) => ({ column, operator, value: value.trim() }));
+  const appliedFilterCount = appliedFilters.length;
+  const hasUnappliedFilters = draftFilters.length > 0 && JSON.stringify(draftFilters) !== JSON.stringify(appliedFilters);
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every(({ index }) => selectedRows.has(index));
 
   function togglePanel(panel: ToolbarPanel) {
@@ -143,7 +145,7 @@ export function DatabaseTableGrid({
   }
 
   function applyFilters() {
-    onApplyFilters(filters.filter(isActiveFilter).map(({ column, operator, value }) => ({ column, operator, value })));
+    onApplyFilters(draftFilters);
   }
 
   function clearFilters() {
@@ -227,27 +229,6 @@ export function DatabaseTableGrid({
           </button>
         ) : null}
 
-        {appliedFilterCount > 0 ? (
-          <button
-            type="button"
-            className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-950/75 px-2.5 text-[13px] font-medium text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900 hover:text-white disabled:opacity-50"
-            onClick={clearFilters}
-            disabled={busy === "rows"}
-          >
-            Clear filters
-          </button>
-        ) : null}
-
-        {sort ? (
-          <button
-            type="button"
-            className="inline-flex h-8 items-center justify-center border border-zinc-700 bg-zinc-950/75 px-2.5 text-[13px] font-medium text-zinc-300 transition hover:border-zinc-500 hover:bg-zinc-900 hover:text-white"
-            onClick={() => setSort(null)}
-          >
-            Clear sort
-          </button>
-        ) : null}
-
         {editable ? (
           <button
             type="button"
@@ -265,9 +246,11 @@ export function DatabaseTableGrid({
           columns={columns}
           filters={filters}
           onFiltersChange={setFilters}
-          canApply={activeFilterCount > 0}
+          canApply={hasUnappliedFilters}
+          canClear={appliedFilterCount > 0}
           applying={busy === "rows"}
           onApply={applyFilters}
+          onClear={clearFilters}
           floating={false}
         />
       ) : null}
