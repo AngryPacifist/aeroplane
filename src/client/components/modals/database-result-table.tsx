@@ -27,7 +27,7 @@ export function DatabaseResultTable({
   }
 
   return (
-    <div className="overflow-auto border border-zinc-700 bg-zinc-950">
+    <div className="h-full min-h-0 overflow-auto border border-zinc-700 bg-zinc-950">
       <table className="min-w-full border-collapse text-left font-mono text-sm">
         <thead className="sticky top-0 z-10 bg-zinc-950 text-zinc-400">
           <tr>
