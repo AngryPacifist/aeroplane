@@ -27,12 +27,12 @@ export function DatabaseResultTable({
   }
 
   return (
-    <div className="overflow-auto border border-[#26323d] bg-[#090f12]">
+    <div className="overflow-auto border border-zinc-700 bg-zinc-950">
       <table className="min-w-full border-collapse text-left font-mono text-sm">
-        <thead className="sticky top-0 z-10 bg-[#0b1116] text-zinc-400">
+        <thead className="sticky top-0 z-10 bg-zinc-950 text-zinc-400">
           <tr>
             {columnMeta.map((column) => (
-              <th key={column.name} className="min-w-[220px] border-b border-r border-[#26323d] px-4 py-3 font-semibold">
+              <th key={column.name} className="min-w-[220px] border-b border-r border-zinc-700 px-4 py-3 font-semibold">
                 <span className="block truncate">
                   <span className="text-zinc-300">{column.name}</span>
                   {column.type ? <span className="ml-2 text-zinc-500">{column.type}</span> : null}
@@ -43,11 +43,11 @@ export function DatabaseResultTable({
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-b border-[#26323d] odd:bg-[#090f12] even:bg-[#0d1519] hover:bg-[#162127]">
+            <tr key={rowIndex} className="border-b border-zinc-800 odd:bg-zinc-950 even:bg-zinc-900/45 hover:bg-zinc-800/60">
               {columnNames.map((column) => {
                 const value = row[column] ?? null;
                 return (
-                  <td key={column} className="min-w-[220px] max-w-[320px] border-r border-[#26323d] px-4 py-3 align-middle text-zinc-200">
+                  <td key={column} className="min-w-[220px] max-w-[320px] border-r border-zinc-800 px-4 py-3 align-middle text-zinc-200">
                     <span className={`block truncate ${value === null ? "text-zinc-600" : ""}`} title={displayValue(value)}>
                       {displayValue(value)}
                     </span>
