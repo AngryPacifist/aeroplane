@@ -1,6 +1,7 @@
 import { Add01Icon, Delete02Icon, FilterHorizontalIcon, Sorting05Icon, SortingDownIcon, SortingUpIcon, TableColumnsSplitIcon } from "@hugeicons/core-free-icons";
 import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { DatabaseColumn, DatabaseRow, DatabaseRowFilter } from "../../api";
+import { Checkbox } from "../ui/checkbox";
 import { AppIcon } from "../ui/primitives";
 import { DatabaseGridColumnsPopover } from "./database-grid-columns-popover";
 import { DatabaseGridFilterPopover } from "./database-grid-filter-popover";
@@ -260,7 +261,7 @@ export function DatabaseTableGrid({
           <thead className="sticky top-0 z-10 bg-zinc-950 text-zinc-400">
             <tr>
               <th className="w-10 border-b border-r border-zinc-700 px-2.5 py-2">
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleRows} className="h-3.5 w-3.5 accent-zinc-500" aria-label="Select visible records" />
+                <Checkbox checked={allVisibleSelected} onChange={toggleVisibleRows} label="Select visible records" />
               </th>
               {visibleColumns.map((column) => {
                 const sorted = sort?.column === column.name;
@@ -295,7 +296,7 @@ export function DatabaseTableGrid({
               return (
                 <tr key={index} className={`border-b border-zinc-800 ${selected ? "bg-zinc-800" : "odd:bg-zinc-950 even:bg-zinc-900/45 hover:bg-zinc-800/60"}`}>
                   <td className="w-10 border-r border-zinc-800 px-2.5 py-2">
-                    <input type="checkbox" checked={selected} onChange={() => toggleRow(index)} className="h-3.5 w-3.5 accent-zinc-500" aria-label={`Select record ${index + 1}`} />
+                    <Checkbox checked={selected} onChange={() => toggleRow(index)} label={`Select record ${index + 1}`} />
                   </td>
                   {visibleColumns.map((column) => {
                     const value = row[column.name];
