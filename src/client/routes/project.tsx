@@ -1,13 +1,13 @@
 import { createRoute, useParams, useSearch } from "@tanstack/react-router";
 import { ProjectPage } from "../pages/project-page";
-import type { ModalTab } from "../components/modals/service-modal-types";
+import { modalTabs, type ModalTab } from "../components/modals/service-modal-types";
 import { rootRoute } from "./root";
 
 export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/$projectSlug",
   validateSearch: (search): { service?: string; tab?: ModalTab } => {
-    const tab = typeof search.tab === "string" && ["deployments", "logs", "environment", "domains", "settings"].includes(search.tab) ? (search.tab as ModalTab) : undefined;
+    const tab = typeof search.tab === "string" && modalTabs.includes(search.tab as ModalTab) ? (search.tab as ModalTab) : undefined;
     return {
       service: typeof search.service === "string" ? search.service : undefined,
       tab
