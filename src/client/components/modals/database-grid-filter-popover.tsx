@@ -18,16 +18,20 @@ export function DatabaseGridFilterPopover({
   filters,
   onFiltersChange,
   canApply = false,
+  canClear = false,
   applying = false,
   onApply,
+  onClear,
   floating = true
 }: {
   columns: DatabaseColumn[];
   filters: GridFilter[];
   onFiltersChange: (filters: GridFilter[]) => void;
   canApply?: boolean;
+  canClear?: boolean;
   applying?: boolean;
   onApply?: () => void;
+  onClear?: () => void;
   floating?: boolean;
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
@@ -70,7 +74,7 @@ export function DatabaseGridFilterPopover({
 
   return (
     <div className={wrapperClass}>
-      <div className="grid gap-3 p-2.5 md:grid-cols-[1fr_240px]">
+      <div className="grid gap-3 p-2.5 md:grid-cols-[1fr_320px]">
         <div className="space-y-2">
           {filters.map((filter, index) => {
             const operator = filterOperators.find((item) => item.value === filter.operator) ?? filterOperators[0];
@@ -150,11 +154,21 @@ export function DatabaseGridFilterPopover({
         </div>
 
         <div className="border-zinc-800 md:border-l md:pl-3">
-          <div className="flex gap-2">
-            <button type="button" className="inline-flex h-8 flex-1 items-center justify-center gap-2 bg-zinc-800 px-2.5 text-[13px] text-zinc-100 hover:bg-zinc-700" onClick={addFilter}>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="inline-flex h-8 items-center justify-center gap-2 bg-zinc-800 px-2.5 text-[13px] text-zinc-100 hover:bg-zinc-700" onClick={addFilter}>
               <AppIcon icon={Add01Icon} size={15} />
               Add filter
             </button>
+            {canClear ? (
+              <button
+                type="button"
+                className="inline-flex h-8 items-center justify-center bg-zinc-800 px-2.5 text-[13px] text-zinc-100 transition hover:bg-zinc-700 disabled:opacity-50"
+                onClick={onClear}
+                disabled={applying}
+              >
+                Clear filters
+              </button>
+            ) : null}
             {canApply ? (
               <button
                 type="button"
