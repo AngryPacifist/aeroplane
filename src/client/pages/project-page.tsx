@@ -6,7 +6,6 @@ import {
   CheckmarkCircle02Icon,
   Cancel01Icon,
   Delete02Icon,
-  FolderCodeIcon,
   FolderOpenIcon,
   GitBranchIcon,
   GithubIcon,
@@ -18,8 +17,7 @@ import { api, type ProjectDetail } from "../api";
 import { AppIcon, FieldLabel, FormInput, FrameworkMark, shellButton } from "../components/ui/primitives";
 import { CreateServiceModal } from "../components/modals/create-service-modal";
 import { DeleteProjectModal } from "../components/modals/delete-project-modal";
-import { ServiceModal } from "../components/modals/service-modal";
-import type { ModalTab, ServiceFormPayload } from "../components/modals/service-modal-types";
+import type { ServiceFormPayload } from "../components/modals/service-modal-types";
 import { formatTime } from "../lib/format";
 import { usePageTitle } from "../lib/page-title";
 
@@ -38,15 +36,7 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`inline-flex border px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.2em] ${tone}`}>{status}</span>;
 }
 
-export function ProjectPage({
-  projectSlug,
-  selectedServiceId,
-  selectedTab = "deployments"
-}: {
-  projectSlug: string;
-  selectedServiceId?: string;
-  selectedTab?: ModalTab;
-}) {
+export function ProjectPage({ projectSlug }: { projectSlug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<null | ProjectDetail>(null);
   const [createServiceOpen, setCreateServiceOpen] = useState(false);
@@ -88,17 +78,18 @@ export function ProjectPage({
     setProjectForm({ name: project.name, description: project.description ?? "" });
   }, [editingProject, project]);
 
-  const selectedService = project?.services.find((service) => service.id === selectedServiceId) ?? null;
   const projectTitle = project?.name ?? projectSlug;
-  const pageTitle = selectedService ? `${selectedService.name} - ${projectTitle}` : projectTitle;
-  usePageTitle(pageTitle);
+  usePageTitle(projectTitle);
 
   async function createService(payload: ServiceFormPayload) {
     if (!project) return;
     const result = await api.createService(project.id, payload);
     await api.createDeployment(result.service.id);
     await loadProject();
-    void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: result.service.id, tab: "deployments" } });
+    void navigate({
+      to: "/$projectSlug/$serviceSlug/$serviceTab",
+      params: { projectSlug, serviceSlug: result.service.slug, serviceTab: "deployments" }
+    });
   }
 
   async function saveProject(event: FormEvent) {
@@ -264,11 +255,11 @@ export function ProjectPage({
                     role="button"
                     tabIndex={0}
                     className="group relative border border-zinc-800 bg-zinc-950/60 p-5 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/70"
-                    onClick={() => void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: service.id, tab: "deployments" } })}
+                    onClick={() => void navigate({ to: "/$projectSlug/$serviceSlug/$serviceTab", params: { projectSlug, serviceSlug: service.slug, serviceTab: "deployments" } })}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: service.id, tab: "deployments" } });
+                        void navigate({ to: "/$projectSlug/$serviceSlug/$serviceTab", params: { projectSlug, serviceSlug: service.slug, serviceTab: "deployments" } });
                       }
                     }}
                   >
@@ -366,18 +357,6 @@ export function ProjectPage({
         onClose={() => setDeleteProjectOpen(false)}
         onConfirm={() => void deleteProject()}
       />
-      {selectedService ? (
-        <ServiceModal
-          key={selectedService.id}
-          projectSlug={projectSlug}
-          selectedTab={selectedTab}
-          serviceId={selectedService.id}
-          onClose={() => void navigate({ to: "/$projectSlug", params: { projectSlug }, search: {} })}
-          onTabChange={(tab) => void navigate({ to: "/$projectSlug", params: { projectSlug }, search: { service: selectedService.id, tab } })}
-          onProjectRefresh={loadProject}
-          onDeleted={() => void navigate({ to: "/$projectSlug", params: { projectSlug }, search: {} })}
-        />
-      ) : null}
     </>
   );
 }
