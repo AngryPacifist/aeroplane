@@ -1,4 +1,5 @@
 import { Globe02Icon } from "@hugeicons/core-free-icons";
+import { Checkbox } from "../ui/checkbox";
 import { AppIcon, FieldLabel } from "../ui/primitives";
 
 type DatabasePublicAccessFieldsProps = {
@@ -28,14 +29,14 @@ export function DatabasePublicAccessFields({
 
   return (
     <div className="space-y-4 border border-zinc-800 bg-zinc-950/35 p-4">
-      <label className="flex cursor-pointer items-start gap-3">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(event) => onEnabledChange(event.target.checked)}
-          disabled={disabled}
-          className="mt-1 h-4 w-4 accent-[#4FB8B2]"
-        />
+      <Checkbox
+        checked={enabled}
+        onChange={onEnabledChange}
+        disabled={disabled}
+        label="Public TCP hostname"
+        className="items-start gap-3"
+        boxClassName="mt-1"
+      >
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 text-sm font-medium text-zinc-100">
             <AppIcon icon={Globe02Icon} size={15} />
@@ -45,7 +46,7 @@ export function DatabasePublicAccessFields({
             Off keeps the database private on the Aeroplane runtime network. On exposes the assigned host port and generates the engine-specific <code>*_PUBLIC_URL</code>.
           </span>
         </span>
-      </label>
+      </Checkbox>
 
       {enabled ? (
         <>
