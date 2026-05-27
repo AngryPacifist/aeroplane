@@ -55,6 +55,15 @@ export function ServicePage({
     void navigate({ to: "/$projectSlug/$serviceSlug/$serviceTab", params: { projectSlug, serviceSlug, serviceTab: segment } });
   }
 
+  function navigateToService(nextServiceSlug: string) {
+    const segment = modalTabToRouteSegment[selectedTab];
+    if (segment === "overview") {
+      void navigate({ to: "/$projectSlug/$serviceSlug", params: { projectSlug, serviceSlug: nextServiceSlug } });
+      return;
+    }
+    void navigate({ to: "/$projectSlug/$serviceSlug/$serviceTab", params: { projectSlug, serviceSlug: nextServiceSlug, serviceTab: segment } });
+  }
+
   if (error) {
     return (
       <main className="relative isolate min-h-dvh overflow-hidden bg-zinc-950 px-5 py-12 text-zinc-100">
@@ -109,6 +118,8 @@ export function ServicePage({
       onTabChange={navigateToTab}
       onProjectRefresh={loadProject}
       onDeleted={navigateToProject}
+      pageServices={project.services}
+      onServiceSelect={navigateToService}
     />
   );
 }
