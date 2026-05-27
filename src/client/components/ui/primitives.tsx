@@ -75,15 +75,6 @@ export const FormInput = forwardRef<HTMLInputElement, React.InputHTMLAttributes<
   }
 );
 
-export function FormSelect(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className={`h-11 w-full border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition focus:border-[#4FB8B2]/60 ${props.className ?? ""}`}
-    />
-  );
-}
-
 export function SectionTitle({ icon, title, meta }: { icon: unknown; title: string; meta?: string }) {
   return (
     <div className="flex items-center gap-3">
