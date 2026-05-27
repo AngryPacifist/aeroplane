@@ -83,6 +83,7 @@ export type DatabaseTable = {
   id: string;
   schema: string;
   name: string;
+  rowCount: number | null;
 };
 
 export type DatabaseColumn = {
@@ -126,6 +127,7 @@ export type DatabaseRowsResponse = {
   rows: DatabaseRow[];
   limit: number;
   offset: number;
+  totalRows: number;
 };
 
 export type DatabaseQueryResult = {
