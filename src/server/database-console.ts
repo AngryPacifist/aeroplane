@@ -1,0 +1,491 @@
+import { spawn } from "node:child_process";
+import { eq } from "drizzle-orm";
+import { containerNameForService, getServiceById } from "./deploy.js";
+import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
+import { db } from "./db.js";
+import { envVars, type Service } from "./schema.js";
+
+export type DatabaseTable = {
+  id: string;
+  schema: string;
+  name: string;
+};
+
+export type DatabaseColumn = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  primaryKey: boolean;
+};
+
+type CommandResult = {
+  stdout: string;
+  stderr: string;
+};
+
+type DatabaseContext = {
+  service: Service;
+  dbType: string;
+  envMap: Map<string, string>;
+  containerName: string;
+};
+
+type RowValue = null | boolean | number | string;
+type RowData = Record<string, RowValue>;
+
+const relationalEngines = new Set(["postgres", "mysql", "clickhouse"]);
+
+function commandError(stderr: string, stdout: string) {
+  return (stderr || stdout || "Database command failed").trim();
+}
+
+function runDockerExec(containerName: string, command: string[], env: Record<string, string> = {}) {
+  return new Promise<CommandResult>((resolvePromise, reject) => {
+    const envArgs = Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+    const child = spawn("docker", ["exec", ...envArgs, containerName, ...command], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise({ stdout, stderr });
+      } else {
+        reject(new Error(commandError(stderr, stdout)));
+      }
+    });
+  });
+}
+
+function envMapForService(serviceId: string) {
+  const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
+  return new Map(rows.map((row) => [row.key, row.value]));
+}
+
+function databaseContext(serviceId: string): DatabaseContext {
+  const service = getServiceById(serviceId);
+  if (!service || !isDatabaseService(service)) {
+    throw new Error("Database service not found");
+  }
+
+  return {
+    service,
+    dbType: databaseTypeForService(service),
+    envMap: envMapForService(service.id),
+    containerName: containerNameForService(service.id)
+  };
+}
+
+function sqlLiteral(value: unknown) {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+  if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function splitTableId(table: string) {
+  const parts = table.split(".").filter(Boolean);
+  if (parts.length >= 2) {
+    return { schema: parts.slice(0, -1).join("."), name: parts.at(-1) ?? table };
+  }
+  return { schema: "", name: table };
+}
+
+function quotePgIdentifier(value: string) {
+  return `"${value.replace(/"/g, "\"\"")}"`;
+}
+
+function quoteMySqlIdentifier(value: string) {
+  return `\`${value.replace(/`/g, "``")}\``;
+}
+
+function quoteClickHouseIdentifier(value: string) {
+  return `\`${value.replace(/`/g, "``")}\``;
+}
+
+function postgresTableSql(table: string) {
+  const { schema, name } = splitTableId(table);
+  return schema ? `${quotePgIdentifier(schema)}.${quotePgIdentifier(name)}` : quotePgIdentifier(name);
+}
+
+function mysqlTableSql(table: string) {
+  const { schema, name } = splitTableId(table);
+  return schema ? `${quoteMySqlIdentifier(schema)}.${quoteMySqlIdentifier(name)}` : quoteMySqlIdentifier(name);
+}
+
+function clickHouseTableSql(table: string) {
+  const { schema, name } = splitTableId(table);
+  return schema ? `${quoteClickHouseIdentifier(schema)}.${quoteClickHouseIdentifier(name)}` : quoteClickHouseIdentifier(name);
+}
+
+function isReadQuery(sql: string) {
+  const trimmed = sql.trim().replace(/^\/\*[\s\S]*?\*\//, "").trim().toLowerCase();
+  return /^(select|with|show|describe|desc|explain)\b/.test(trimmed);
+}
+
+function isPostgresRowQuery(sql: string) {
+  const trimmed = sql.trim().replace(/^\/\*[\s\S]*?\*\//, "").trim().toLowerCase();
+  return /^(select|with)\b/.test(trimmed);
+}
+
+function stripTrailingSemicolon(sql: string) {
+  return sql.trim().replace(/;+$/, "");
+}
+
+async function runPostgres(ctx: DatabaseContext, sql: string) {
+  const user = ctx.envMap.get("POSTGRES_USER") || "postgres";
+  const password = ctx.envMap.get("POSTGRES_PASSWORD") || "";
+  const dbName = ctx.envMap.get("POSTGRES_DB") || "aeroplane";
+  const result = await runDockerExec(
+    ctx.containerName,
+    [
+      "psql",
+      "-h",
+      "127.0.0.1",
+      "-p",
+      String(ctx.service.internalPort),
+      "-U",
+      user,
+      "-d",
+      dbName,
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-X",
+      "-q",
+      "-t",
+      "-A",
+      "-c",
+      sql
+    ],
+    { PGPASSWORD: password }
+  );
+  return result.stdout.trim();
+}
+
+async function postgresJson<T>(ctx: DatabaseContext, sql: string): Promise<T> {
+  const output = await runPostgres(ctx, sql);
+  return JSON.parse(output || "[]") as T;
+}
+
+async function runMysql(ctx: DatabaseContext, sql: string) {
+  const user = ctx.envMap.get("MYSQL_USER") || "mysql";
+  const password = ctx.envMap.get("MYSQL_PASSWORD") || "";
+  const dbName = ctx.envMap.get("MYSQL_DATABASE") || "aeroplane";
+  const result = await runDockerExec(
+    ctx.containerName,
+    [
+      "mysql",
+      "-h",
+      "127.0.0.1",
+      "-P",
+      String(ctx.service.internalPort),
+      "-u",
+      user,
+      dbName,
+      "--batch",
+      "--raw",
+      "--execute",
+      sql
+    ],
+    { MYSQL_PWD: password }
+  );
+  return result.stdout.trim();
+}
+
+function parseTsv(output: string) {
+  const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
+  if (lines.length === 0) return { columns: [] as string[], rows: [] as RowData[] };
+
+  const columns = lines[0].split("\t");
+  const rows = lines.slice(1).map((line) => {
+    const values = line.split("\t");
+    return Object.fromEntries(columns.map((column, index) => [column, values[index] === "NULL" ? null : values[index] ?? ""]));
+  });
+  return { columns, rows };
+}
+
+async function runClickHouse(ctx: DatabaseContext, sql: string) {
+  const user = ctx.envMap.get("CLICKHOUSE_USER") || "clickhouse";
+  const password = ctx.envMap.get("CLICKHOUSE_PASSWORD") || "";
+  const result = await runDockerExec(ctx.containerName, ["clickhouse-client", "--user", user, "--password", password, "--query", sql]);
+  return result.stdout.trim();
+}
+
+function parseJsonEachRow(output: string) {
+  const rows = output
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as RowData);
+  return rows;
+}
+
+function unsupportedResponse(ctx: DatabaseContext) {
+  return {
+    engine: ctx.dbType,
+    supported: false,
+    editable: false,
+    tables: [] as DatabaseTable[],
+    message: `${ctx.dbType} browsing is not available yet. SQL console is available for PostgreSQL, MySQL, and ClickHouse databases.`
+  };
+}
+
+export async function getDatabaseTables(serviceId: string) {
+  const ctx = databaseContext(serviceId);
+  if (!relationalEngines.has(ctx.dbType)) return unsupportedResponse(ctx);
+
+  if (ctx.dbType === "postgres") {
+    const tables = await postgresJson<DatabaseTable[]>(ctx, `
+      SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
+      FROM (
+        SELECT table_schema AS schema, table_name AS name, table_schema || '.' || table_name AS id
+        FROM information_schema.tables
+        WHERE table_type = 'BASE TABLE'
+          AND table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY table_schema, table_name
+      ) t
+    `);
+    return { engine: ctx.dbType, supported: true, editable: true, tables };
+  }
+
+  if (ctx.dbType === "mysql") {
+    const parsed = parseTsv(await runMysql(ctx, `
+      SELECT TABLE_SCHEMA AS \`schema\`, TABLE_NAME AS name, CONCAT(TABLE_SCHEMA, '.', TABLE_NAME) AS id
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_SCHEMA = DATABASE()
+      ORDER BY TABLE_NAME
+    `));
+    const tables = parsed.rows.map((row) => ({
+      id: String(row.id),
+      schema: String(row.schema),
+      name: String(row.name)
+    }));
+    return { engine: ctx.dbType, supported: true, editable: true, tables };
+  }
+
+  const tableRows = parseJsonEachRow(await runClickHouse(ctx, `
+    SELECT database AS schema, name, concat(database, '.', name) AS id
+    FROM system.tables
+    WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+    ORDER BY database, name
+    FORMAT JSONEachRow
+  `));
+  const tables = tableRows.map((row) => ({
+    id: String(row.id),
+    schema: String(row.schema),
+    name: String(row.name)
+  }));
+  return { engine: ctx.dbType, supported: true, editable: false, tables };
+}
+
+export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number) {
+  const ctx = databaseContext(serviceId);
+  const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
+  const safeOffset = Math.max(offset || 0, 0);
+
+  if (ctx.dbType === "postgres") {
+    const { schema, name } = splitTableId(table);
+    const columns = await postgresJson<DatabaseColumn[]>(ctx, `
+      SELECT COALESCE(json_agg(row_to_json(c)), '[]'::json)
+      FROM (
+        SELECT
+          c.column_name AS name,
+          c.data_type AS type,
+          c.is_nullable = 'YES' AS "nullable",
+          EXISTS (
+            SELECT 1
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_schema = c.table_schema
+              AND tc.table_name = c.table_name
+              AND kcu.column_name = c.column_name
+          ) AS "primaryKey"
+        FROM information_schema.columns c
+        WHERE c.table_schema = ${sqlLiteral(schema || "public")}
+          AND c.table_name = ${sqlLiteral(name)}
+        ORDER BY c.ordinal_position
+      ) c
+    `);
+    const rows = await postgresJson<RowData[]>(ctx, `
+      SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json)
+      FROM (
+        SELECT * FROM ${postgresTableSql(table)}
+        LIMIT ${safeLimit} OFFSET ${safeOffset}
+      ) r
+    `);
+    return { engine: ctx.dbType, editable: true, table, columns, rows, limit: safeLimit, offset: safeOffset };
+  }
+
+  if (ctx.dbType === "mysql") {
+    const { name } = splitTableId(table);
+    const columnRows = parseTsv(await runMysql(ctx, `
+      SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IF(IS_NULLABLE = 'YES', 'true', 'false') AS nullable, IF(COLUMN_KEY = 'PRI', 'true', 'false') AS primaryKey
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${sqlLiteral(name)}
+      ORDER BY ORDINAL_POSITION
+    `)).rows;
+    const columns = columnRows.map((row) => ({
+      name: String(row.name),
+      type: String(row.type),
+      nullable: row.nullable === "true",
+      primaryKey: row.primaryKey === "true"
+    }));
+    const parsed = parseTsv(await runMysql(ctx, `SELECT * FROM ${mysqlTableSql(table)} LIMIT ${safeLimit} OFFSET ${safeOffset}`));
+    return { engine: ctx.dbType, editable: true, table, columns, rows: parsed.rows, limit: safeLimit, offset: safeOffset };
+  }
+
+  if (ctx.dbType === "clickhouse") {
+    const { schema, name } = splitTableId(table);
+    const columnRows = parseJsonEachRow(await runClickHouse(ctx, `
+      SELECT name, type, 1 AS nullable, 0 AS primaryKey
+      FROM system.columns
+      WHERE database = ${sqlLiteral(schema)} AND table = ${sqlLiteral(name)}
+      ORDER BY position
+      FORMAT JSONEachRow
+    `));
+    const columns = columnRows.map((row) => ({
+      name: String(row.name),
+      type: String(row.type),
+      nullable: true,
+      primaryKey: false
+    })) as DatabaseColumn[];
+    const rows = parseJsonEachRow(await runClickHouse(ctx, `
+      SELECT * FROM ${clickHouseTableSql(table)}
+      LIMIT ${safeLimit} OFFSET ${safeOffset}
+      FORMAT JSONEachRow
+    `));
+    return { engine: ctx.dbType, editable: false, table, columns, rows, limit: safeLimit, offset: safeOffset };
+  }
+
+  throw new Error("Database browsing is not available for this engine");
+}
+
+export async function runDatabaseQuery(serviceId: string, sql: string) {
+  const ctx = databaseContext(serviceId);
+  const trimmed = stripTrailingSemicolon(sql);
+  if (!trimmed) throw new Error("SQL is required");
+
+  const startedAt = Date.now();
+  if (ctx.dbType === "postgres") {
+    if (isPostgresRowQuery(trimmed)) {
+      const rows = await postgresJson<RowData[]>(ctx, `
+        SELECT COALESCE(json_agg(row_to_json(q)), '[]'::json)
+        FROM (${trimmed}) q
+      `);
+      const columns = rows[0] ? Object.keys(rows[0]) : [];
+      return { engine: ctx.dbType, columns, rows, rowCount: rows.length, elapsedMs: Date.now() - startedAt };
+    }
+    const message = await runPostgres(ctx, trimmed);
+    return { engine: ctx.dbType, columns: [], rows: [], rowCount: 0, message, elapsedMs: Date.now() - startedAt };
+  }
+
+  if (ctx.dbType === "mysql") {
+    const output = await runMysql(ctx, trimmed);
+    const parsed = parseTsv(output);
+    return {
+      engine: ctx.dbType,
+      columns: parsed.columns,
+      rows: parsed.rows,
+      rowCount: parsed.rows.length,
+      message: parsed.rows.length === 0 ? output : undefined,
+      elapsedMs: Date.now() - startedAt
+    };
+  }
+
+  if (ctx.dbType === "clickhouse") {
+    if (isReadQuery(trimmed)) {
+      const sqlWithFormat = /\bformat\s+\w+$/i.test(trimmed) ? trimmed : `${trimmed} FORMAT JSONEachRow`;
+      const rows = parseJsonEachRow(await runClickHouse(ctx, sqlWithFormat));
+      const columns = rows[0] ? Object.keys(rows[0]) : [];
+      return { engine: ctx.dbType, columns, rows, rowCount: rows.length, elapsedMs: Date.now() - startedAt };
+    }
+    const message = await runClickHouse(ctx, trimmed);
+    return { engine: ctx.dbType, columns: [], rows: [], rowCount: 0, message, elapsedMs: Date.now() - startedAt };
+  }
+
+  throw new Error("SQL console is not available for this engine");
+}
+
+export async function insertDatabaseRow(serviceId: string, table: string, values: RowData) {
+  const ctx = databaseContext(serviceId);
+  const entries = Object.entries(values).filter(([key]) => key.trim());
+  if (entries.length === 0) throw new Error("At least one column value is required");
+
+  if (ctx.dbType === "postgres") {
+    await runPostgres(
+      ctx,
+      `INSERT INTO ${postgresTableSql(table)} (${entries.map(([key]) => quotePgIdentifier(key)).join(", ")}) VALUES (${entries.map(([, value]) => sqlLiteral(value)).join(", ")})`
+    );
+    return { ok: true };
+  }
+
+  if (ctx.dbType === "mysql") {
+    await runMysql(
+      ctx,
+      `INSERT INTO ${mysqlTableSql(table)} (${entries.map(([key]) => quoteMySqlIdentifier(key)).join(", ")}) VALUES (${entries.map(([, value]) => sqlLiteral(value)).join(", ")})`
+    );
+    return { ok: true };
+  }
+
+  throw new Error("Row editing is not available for this engine");
+}
+
+export async function updateDatabaseRow(serviceId: string, table: string, primaryKey: RowData, values: RowData) {
+  const ctx = databaseContext(serviceId);
+  const assignments = Object.entries(values).filter(([key]) => key.trim());
+  const where = Object.entries(primaryKey).filter(([key]) => key.trim());
+  if (assignments.length === 0) throw new Error("No changes to save");
+  if (where.length === 0) throw new Error("A primary key is required to update rows");
+
+  if (ctx.dbType === "postgres") {
+    await runPostgres(
+      ctx,
+      `UPDATE ${postgresTableSql(table)} SET ${assignments.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(", ")} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
+    );
+    return { ok: true };
+  }
+
+  if (ctx.dbType === "mysql") {
+    await runMysql(
+      ctx,
+      `UPDATE ${mysqlTableSql(table)} SET ${assignments.map(([key, value]) => `${quoteMySqlIdentifier(key)} = ${sqlLiteral(value)}`).join(", ")} WHERE ${where.map(([key, value]) => `${quoteMySqlIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
+    );
+    return { ok: true };
+  }
+
+  throw new Error("Row editing is not available for this engine");
+}
+
+export async function deleteDatabaseRow(serviceId: string, table: string, primaryKey: RowData) {
+  const ctx = databaseContext(serviceId);
+  const where = Object.entries(primaryKey).filter(([key]) => key.trim());
+  if (where.length === 0) throw new Error("A primary key is required to delete rows");
+
+  if (ctx.dbType === "postgres") {
+    await runPostgres(
+      ctx,
+      `DELETE FROM ${postgresTableSql(table)} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
+    );
+    return { ok: true };
+  }
+
+  if (ctx.dbType === "mysql") {
+    await runMysql(
+      ctx,
+      `DELETE FROM ${mysqlTableSql(table)} WHERE ${where.map(([key, value]) => `${quoteMySqlIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
+    );
+    return { ok: true };
+  }
+
+  throw new Error("Row editing is not available for this engine");
+}
