@@ -25,7 +25,6 @@ import {
   CheckmarkBadge01Icon,
   Alert02Icon
 } from "@hugeicons/core-free-icons";
-import { Link } from "@tanstack/react-router";
 import { ClipboardEvent, FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
@@ -53,6 +52,7 @@ import {
 } from "../ui/primitives";
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from "../../lib/github-cache";
+import { DeployPlaneIcon } from "../icons/deploy-plane-icon";
 import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
@@ -83,6 +83,7 @@ type ParsedEnvEntry = {
 };
 
 const modalTabLabels: Record<ModalTab, string> = {
+  overview: "Overview",
   deployments: "Deployments",
   logs: "Logs",
   environment: "Variables",
@@ -179,7 +180,8 @@ export function ServiceModal({
   onClose,
   onTabChange,
   onProjectRefresh,
-  onDeleted
+  onDeleted,
+  presentation = "modal"
 }: {
   projectSlug: string;
   selectedTab: ModalTab;
@@ -188,6 +190,7 @@ export function ServiceModal({
   onTabChange: (tab: ModalTab) => void;
   onProjectRefresh: () => Promise<void> | void;
   onDeleted: () => void;
+  presentation?: "modal" | "page";
 }) {
   const [overview, setOverview] = useState<null | ServiceOverview>(null);
   const [activeDeploymentId, setActiveDeploymentId] = useState<null | string>(null);
@@ -535,6 +538,7 @@ export function ServiceModal({
   const service = overview?.service;
   const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
   const visibleTabs = ([
+    ["overview", CloudServerIcon],
     ["deployments", PackageIcon],
     ["logs", LeftToRightListStarIcon],
     ["environment", VariableIcon],
@@ -554,6 +558,32 @@ export function ServiceModal({
     activeDeployment && (activeDeployment.status === "queued" || activeDeployment.status === "building")
       ? formatBuildDuration(activeDeployment.startedAt ?? activeDeployment.createdAt, activeDeployment.finishedAt, nowMs)
       : null;
+  const isPage = presentation === "page";
+  const shellClass = isPage
+    ? "relative isolate min-h-dvh overflow-x-hidden bg-zinc-950 text-zinc-100"
+    : "fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4 backdrop-blur-sm";
+  const viewportClass = isPage
+    ? "relative z-10 mx-auto flex w-full max-w-7xl flex-col px-5 pb-16 pt-10 sm:px-6 lg:px-10"
+    : "mx-auto flex min-h-full max-w-6xl items-center justify-center";
+  const panelClass = isPage
+    ? "flex min-h-[calc(100vh-6.5rem)] w-full flex-col"
+    : "flex h-[min(860px,calc(100vh-2rem))] min-h-[680px] w-full flex-col border border-zinc-700/90 bg-zinc-900/98 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)] md:p-7";
+  const headerClass = isPage
+    ? "flex flex-col gap-5 border-b border-zinc-800 pb-8 lg:flex-row lg:items-start lg:justify-between"
+    : "flex flex-col gap-4 pb-5 lg:flex-row lg:items-start lg:justify-between";
+  const iconClass = isPage
+    ? "grid h-14 w-14 flex-none place-items-center overflow-hidden border border-zinc-700 bg-zinc-900/80 p-3 text-zinc-300"
+    : "grid h-10 w-10 flex-none place-items-center overflow-hidden border border-zinc-700 bg-zinc-900/90 p-2.5 text-zinc-300";
+  const tabsClass = isPage
+    ? "flex flex-wrap gap-2"
+    : "flex flex-wrap gap-2";
+  const tabButtonClass = (tab: ModalTab) => isPage
+    ? `${chipClass(selectedTab === tab)} py-1.5`
+    : chipClass(selectedTab === tab);
+  const tabUsesContainedScroll = selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql";
+  const contentClass = isPage
+    ? `mt-6 flex-1 ${tabUsesContainedScroll ? "min-h-[640px] overflow-hidden" : ""}`
+    : `mt-4 min-h-0 flex-1 pr-1 ${tabUsesContainedScroll ? "overflow-hidden" : "overflow-y-auto"}`;
 
   useEffect(() => {
     if (!service) return;
@@ -566,20 +596,34 @@ export function ServiceModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4 backdrop-blur-sm">
-        <div className="mx-auto flex min-h-full max-w-6xl items-center justify-center">
-          <div className="flex h-[min(860px,calc(100vh-2rem))] min-h-[680px] w-full flex-col border border-zinc-700/90 bg-zinc-900/98 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)] md:p-7">
-            <div className="flex flex-col gap-4 pb-5 lg:flex-row lg:items-start lg:justify-between">
+      <div className={shellClass}>
+        {isPage ? (
+          <>
+            <div aria-hidden className="hero-noise pointer-events-none absolute inset-0" />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_0%_0%,rgba(79,184,178,0.10),transparent),radial-gradient(ellipse_70%_50%_at_100%_100%,rgba(120,113,255,0.06),transparent)]"
+            />
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] [background-size:72px_72px]"
+            />
+          </>
+        ) : null}
+        <div className={viewportClass}>
+          <div className={panelClass}>
+            {!isPage ? (
+            <div className={headerClass}>
                 <div className="flex min-w-0 items-start gap-3">
-                  <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden border border-zinc-700 bg-zinc-900/90 p-2.5 text-zinc-300">
-                    <FrameworkMark framework={service?.framework ?? null} size={18} fallback={<AppIcon icon={Globe02Icon} size={18} />} />
+                  <div className={iconClass}>
+                    <FrameworkMark framework={service?.framework ?? null} size={isPage ? 28 : 18} fallback={<AppIcon icon={Globe02Icon} size={isPage ? 24 : 18} />} />
                   </div>
                   <div className="min-w-0">
                     <div className="mb-2 inline-flex max-w-full items-center gap-2 border border-zinc-700 bg-zinc-800/90 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-400">
                       <AppIcon icon={isDatabase ? CloudServerIcon : GithubIcon} size={14} />
                       <span className="truncate">{isDatabase ? "Database Service" : (service?.repoFullName ?? service?.repoUrl)}</span>
                     </div>
-                    <h2 className="truncate font-hero text-2xl tracking-tight text-zinc-100">{service?.name ?? "Service"}</h2>
+                    <h2 className={`truncate font-hero tracking-tight text-zinc-100 ${isPage ? "text-4xl" : "text-2xl"}`}>{service?.name ?? "Service"}</h2>
                     <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
                       {isDatabase ? (
                         <div className="inline-flex max-w-full items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
@@ -618,14 +662,29 @@ export function ServiceModal({
                   Deploy
                 </button>
                 <button type="button" className={shellButton("ghost")} onClick={onClose}>
-                  Close
+                  {isPage ? "Project" : "Close"}
                 </button>
               </div>
             </div>
+            ) : null}
 
-            <div className="flex flex-wrap gap-2">
+            {isPage ? (
+              <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center gap-2 border border-[#4FB8B2]/45 bg-[#4FB8B2]/12 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9af4ee] transition hover:bg-[#4FB8B2]/20 disabled:opacity-60"
+                  onClick={() => void doAction("deploy", async () => void api.createDeployment(serviceId))}
+                  disabled={busy === "deploy"}
+                >
+                  <DeployPlaneIcon size={16} />
+                  Deploy
+                </button>
+              </div>
+            ) : null}
+
+            <div className={tabsClass}>
               {visibleTabs.map(([tab, icon]) => (
-                <button key={tab} type="button" className={chipClass(selectedTab === tab)} onClick={() => onTabChange(tab)}>
+                <button key={tab} type="button" className={tabButtonClass(tab)} onClick={() => onTabChange(tab)}>
                   <AppIcon icon={icon} size={15} />
                   <span>{modalTabLabels[tab]}</span>
                 </button>
@@ -634,7 +693,19 @@ export function ServiceModal({
 
             {error ? <div className="mt-3 border border-rose-500/25 bg-rose-950/20 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
 
-            <div className={`mt-4 min-h-0 flex-1 pr-1 ${selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql" ? "overflow-hidden" : "overflow-y-auto"}`}>
+            <div className={contentClass}>
+              {selectedTab === "overview" ? (
+                <div className="flex min-h-[360px] items-center justify-center border border-dashed border-zinc-800 bg-zinc-950/35 p-8 text-center">
+                  <div>
+                    <div className="mx-auto grid h-12 w-12 place-items-center border border-zinc-800 bg-zinc-900 text-zinc-500">
+                      <AppIcon icon={CloudServerIcon} size={20} />
+                    </div>
+                    <h3 className="mt-4 font-hero text-xl text-zinc-100">Overview</h3>
+                    <p className="mt-2 max-w-md text-sm leading-6 text-zinc-500">This page is ready for service summary content.</p>
+                  </div>
+                </div>
+              ) : null}
+
               {selectedTab === "deployments" ? (
                 <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
                   <div className="min-h-0 overflow-y-auto pr-1 lg:w-[340px] lg:flex-none">
