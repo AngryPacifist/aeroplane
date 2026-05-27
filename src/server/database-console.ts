@@ -33,7 +33,35 @@ type DatabaseContext = {
 type RowValue = null | boolean | number | string;
 type RowData = Record<string, RowValue>;
 
+export type DatabaseFilterOperator =
+  | "equals"
+  | "not_equals"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with"
+  | "is_empty"
+  | "is_not_empty"
+  | "greater_than"
+  | "less_than";
+
+export type DatabaseRowFilter = {
+  column: string;
+  operator: DatabaseFilterOperator;
+  value: string;
+};
+
 const relationalEngines = new Set(["postgres", "mysql", "clickhouse"]);
+const valueFilterOperators = new Set<DatabaseFilterOperator>([
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "starts_with",
+  "ends_with",
+  "greater_than",
+  "less_than"
+]);
 
 function commandError(stderr: string, stdout: string) {
   return (stderr || stdout || "Database command failed").trim();
@@ -124,6 +152,84 @@ function mysqlTableSql(table: string) {
 function clickHouseTableSql(table: string) {
   const { schema, name } = splitTableId(table);
   return schema ? `${quoteClickHouseIdentifier(schema)}.${quoteClickHouseIdentifier(name)}` : quoteClickHouseIdentifier(name);
+}
+
+function activeFiltersForColumns(filters: DatabaseRowFilter[], columns: DatabaseColumn[]) {
+  const columnNames = new Set(columns.map((column) => column.name));
+  return filters
+    .filter((filter) => columnNames.has(filter.column))
+    .filter((filter) => !valueFilterOperators.has(filter.operator) || filter.value.trim())
+    .slice(0, 12);
+}
+
+function likePattern(value: string, mode: "contains" | "starts_with" | "ends_with") {
+  if (mode === "starts_with") return `${value}%`;
+  if (mode === "ends_with") return `%${value}`;
+  return `%${value}%`;
+}
+
+function comparisonValue(value: string) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : sqlLiteral(value);
+}
+
+function postgresFilterSql(filter: DatabaseRowFilter) {
+  const column = quotePgIdentifier(filter.column);
+  const textColumn = `LOWER(CAST(${column} AS TEXT))`;
+  const loweredValue = sqlLiteral(filter.value.toLowerCase());
+
+  if (filter.operator === "equals") return `${textColumn} = ${loweredValue}`;
+  if (filter.operator === "not_equals") return `(${column} IS NULL OR ${textColumn} <> ${loweredValue})`;
+  if (filter.operator === "contains") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))}`;
+  if (filter.operator === "not_contains") return `(${column} IS NULL OR ${textColumn} NOT LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))})`;
+  if (filter.operator === "starts_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "starts_with"))}`;
+  if (filter.operator === "ends_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "ends_with"))}`;
+  if (filter.operator === "is_empty") return `(${column} IS NULL OR CAST(${column} AS TEXT) = '')`;
+  if (filter.operator === "is_not_empty") return `(${column} IS NOT NULL AND CAST(${column} AS TEXT) <> '')`;
+  if (filter.operator === "greater_than") return `${column} > ${comparisonValue(filter.value)}`;
+  if (filter.operator === "less_than") return `${column} < ${comparisonValue(filter.value)}`;
+  return "TRUE";
+}
+
+function mysqlFilterSql(filter: DatabaseRowFilter) {
+  const column = quoteMySqlIdentifier(filter.column);
+  const textColumn = `LOWER(CAST(${column} AS CHAR))`;
+  const loweredValue = sqlLiteral(filter.value.toLowerCase());
+
+  if (filter.operator === "equals") return `${textColumn} = ${loweredValue}`;
+  if (filter.operator === "not_equals") return `(${column} IS NULL OR ${textColumn} <> ${loweredValue})`;
+  if (filter.operator === "contains") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))}`;
+  if (filter.operator === "not_contains") return `(${column} IS NULL OR ${textColumn} NOT LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))})`;
+  if (filter.operator === "starts_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "starts_with"))}`;
+  if (filter.operator === "ends_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "ends_with"))}`;
+  if (filter.operator === "is_empty") return `(${column} IS NULL OR CAST(${column} AS CHAR) = '')`;
+  if (filter.operator === "is_not_empty") return `(${column} IS NOT NULL AND CAST(${column} AS CHAR) <> '')`;
+  if (filter.operator === "greater_than") return `${column} > ${comparisonValue(filter.value)}`;
+  if (filter.operator === "less_than") return `${column} < ${comparisonValue(filter.value)}`;
+  return "TRUE";
+}
+
+function clickHouseFilterSql(filter: DatabaseRowFilter) {
+  const column = quoteClickHouseIdentifier(filter.column);
+  const textColumn = `lowerUTF8(toString(${column}))`;
+  const loweredValue = sqlLiteral(filter.value.toLowerCase());
+
+  if (filter.operator === "equals") return `${textColumn} = ${loweredValue}`;
+  if (filter.operator === "not_equals") return `(isNull(${column}) OR ${textColumn} <> ${loweredValue})`;
+  if (filter.operator === "contains") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))}`;
+  if (filter.operator === "not_contains") return `(isNull(${column}) OR ${textColumn} NOT LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "contains"))})`;
+  if (filter.operator === "starts_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "starts_with"))}`;
+  if (filter.operator === "ends_with") return `${textColumn} LIKE ${sqlLiteral(likePattern(filter.value.toLowerCase(), "ends_with"))}`;
+  if (filter.operator === "is_empty") return `(isNull(${column}) OR toString(${column}) = '')`;
+  if (filter.operator === "is_not_empty") return `(NOT isNull(${column}) AND toString(${column}) <> '')`;
+  if (filter.operator === "greater_than") return `${column} > ${comparisonValue(filter.value)}`;
+  if (filter.operator === "less_than") return `${column} < ${comparisonValue(filter.value)}`;
+  return "1";
+}
+
+function whereClause(filters: DatabaseRowFilter[], buildFilterSql: (filter: DatabaseRowFilter) => string) {
+  if (filters.length === 0) return "";
+  return `WHERE ${filters.map(buildFilterSql).join(" AND ")}`;
 }
 
 function isReadQuery(sql: string) {
@@ -285,7 +391,7 @@ export async function getDatabaseTables(serviceId: string) {
   return { engine: ctx.dbType, supported: true, editable: false, tables };
 }
 
-export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number) {
+export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number, filters: DatabaseRowFilter[] = []) {
   const ctx = databaseContext(serviceId);
   const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
   const safeOffset = Math.max(offset || 0, 0);
@@ -316,10 +422,12 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
         ORDER BY c.ordinal_position
       ) c
     `);
+    const activeFilters = activeFiltersForColumns(filters, columns);
     const rows = await postgresJson<RowData[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json)
       FROM (
         SELECT * FROM ${postgresTableSql(table)}
+        ${whereClause(activeFilters, postgresFilterSql)}
         LIMIT ${safeLimit} OFFSET ${safeOffset}
       ) r
     `);
@@ -340,7 +448,8 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
       nullable: row.nullable === "true",
       primaryKey: row.primaryKey === "true"
     }));
-    const parsed = parseTsv(await runMysql(ctx, `SELECT * FROM ${mysqlTableSql(table)} LIMIT ${safeLimit} OFFSET ${safeOffset}`));
+    const activeFilters = activeFiltersForColumns(filters, columns);
+    const parsed = parseTsv(await runMysql(ctx, `SELECT * FROM ${mysqlTableSql(table)} ${whereClause(activeFilters, mysqlFilterSql)} LIMIT ${safeLimit} OFFSET ${safeOffset}`));
     return { engine: ctx.dbType, editable: true, table, columns, rows: parsed.rows, limit: safeLimit, offset: safeOffset };
   }
 
@@ -359,8 +468,10 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
       nullable: true,
       primaryKey: false
     })) as DatabaseColumn[];
+    const activeFilters = activeFiltersForColumns(filters, columns);
     const rows = parseJsonEachRow(await runClickHouse(ctx, `
       SELECT * FROM ${clickHouseTableSql(table)}
+      ${whereClause(activeFilters, clickHouseFilterSql)}
       LIMIT ${safeLimit} OFFSET ${safeOffset}
       FORMAT JSONEachRow
     `));
