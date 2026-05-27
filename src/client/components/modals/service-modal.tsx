@@ -33,6 +33,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
   type RuntimeLog,
+  type Service,
   type ServiceOverview
 } from "../../api";
 import { ModalShell } from "./modal-shell";
@@ -52,7 +53,7 @@ import {
 } from "../ui/primitives";
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from "../../lib/github-cache";
-import { DeployPlaneIcon } from "../icons/deploy-plane-icon";
+import { ServicePageToolbar } from "../services/service-page-toolbar";
 import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
@@ -181,7 +182,9 @@ export function ServiceModal({
   onTabChange,
   onProjectRefresh,
   onDeleted,
-  presentation = "modal"
+  presentation = "modal",
+  pageServices = [],
+  onServiceSelect
 }: {
   projectSlug: string;
   selectedTab: ModalTab;
@@ -191,6 +194,8 @@ export function ServiceModal({
   onProjectRefresh: () => Promise<void> | void;
   onDeleted: () => void;
   presentation?: "modal" | "page";
+  pageServices?: Service[];
+  onServiceSelect?: (serviceSlug: string) => void;
 }) {
   const [overview, setOverview] = useState<null | ServiceOverview>(null);
   const [activeDeploymentId, setActiveDeploymentId] = useState<null | string>(null);
@@ -560,13 +565,13 @@ export function ServiceModal({
       : null;
   const isPage = presentation === "page";
   const shellClass = isPage
-    ? "relative isolate min-h-dvh overflow-x-hidden bg-zinc-950 text-zinc-100"
+    ? "relative isolate h-dvh overflow-hidden bg-zinc-950 text-zinc-100"
     : "fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4 backdrop-blur-sm";
   const viewportClass = isPage
-    ? "relative z-10 mx-auto flex w-full max-w-7xl flex-col px-5 pb-16 pt-10 sm:px-6 lg:px-10"
+    ? "relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col px-5 py-10 sm:px-6 lg:px-10"
     : "mx-auto flex min-h-full max-w-6xl items-center justify-center";
   const panelClass = isPage
-    ? "flex min-h-[calc(100vh-6.5rem)] w-full flex-col"
+    ? "flex min-h-0 w-full flex-1 flex-col"
     : "flex h-[min(860px,calc(100vh-2rem))] min-h-[680px] w-full flex-col border border-zinc-700/90 bg-zinc-900/98 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)] md:p-7";
   const headerClass = isPage
     ? "flex flex-col gap-5 border-b border-zinc-800 pb-8 lg:flex-row lg:items-start lg:justify-between"
@@ -582,7 +587,7 @@ export function ServiceModal({
     : chipClass(selectedTab === tab);
   const tabUsesContainedScroll = selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql";
   const contentClass = isPage
-    ? `mt-6 flex-1 ${tabUsesContainedScroll ? "min-h-[640px] overflow-hidden" : ""}`
+    ? `mt-6 min-h-0 flex-1 ${tabUsesContainedScroll ? "overflow-hidden" : "overflow-y-auto"}`
     : `mt-4 min-h-0 flex-1 pr-1 ${tabUsesContainedScroll ? "overflow-hidden" : "overflow-y-auto"}`;
 
   useEffect(() => {
@@ -669,17 +674,14 @@ export function ServiceModal({
             ) : null}
 
             {isPage ? (
-              <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  className="inline-flex h-9 items-center justify-center gap-2 border border-[#4FB8B2]/45 bg-[#4FB8B2]/12 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9af4ee] transition hover:bg-[#4FB8B2]/20 disabled:opacity-60"
-                  onClick={() => void doAction("deploy", async () => void api.createDeployment(serviceId))}
-                  disabled={busy === "deploy"}
-                >
-                  <DeployPlaneIcon size={16} />
-                  Deploy
-                </button>
-              </div>
+              <ServicePageToolbar
+                services={pageServices}
+                currentService={service ?? null}
+                deploying={busy === "deploy"}
+                onBack={onClose}
+                onDeploy={() => void doAction("deploy", async () => void api.createDeployment(serviceId))}
+                onServiceSelect={onServiceSelect ?? (() => undefined)}
+              />
             ) : null}
 
             <div className={tabsClass}>
