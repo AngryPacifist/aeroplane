@@ -4,6 +4,7 @@ import {
   CheckmarkCircle02Icon,
   Cancel01Icon,
   Delete02Icon,
+  DatabaseIcon,
   FolderCodeIcon,
   FolderOpenIcon,
   GitBranchIcon,
@@ -13,7 +14,9 @@ import {
   PackageIcon,
   PencilEdit02Icon,
   Search01Icon,
-  Settings01Icon,
+  LeftToRightListStarIcon,
+  VariableIcon,
+  VideoConsoleIcon,
   WorkflowSquare07Icon,
   CloudServerIcon,
   CopyIcon,
@@ -56,6 +59,8 @@ import { SourcePickerModal } from "./source-picker";
 import type { ModalTab } from "./service-modal-types";
 import { EnvVarRow } from "./env-var-row";
 import { DatabaseServiceSettingsPanel } from "./database-service-settings-panel";
+import { DatabaseBrowserPanel } from "./database-browser-panel";
+import { DatabaseSqlConsolePanel } from "./database-sql-console-panel";
 
 function formatBuildDuration(startedAt: null | string, finishedAt: null | string, nowMs: number) {
   const start = startedAt ? Date.parse(startedAt) : Number.NaN;
@@ -75,6 +80,16 @@ function formatBuildDuration(startedAt: null | string, finishedAt: null | string
 type ParsedEnvEntry = {
   key: string;
   value: string;
+};
+
+const modalTabLabels: Record<ModalTab, string> = {
+  deployments: "Deployments",
+  logs: "Logs",
+  environment: "Variables",
+  domains: "Domains",
+  data: "Data",
+  sql: "Console",
+  settings: "Settings"
 };
 
 function parseEnvText(input: string): ParsedEnvEntry[] {
@@ -123,7 +138,7 @@ function LogsPanel({
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">
-            <AppIcon icon={WorkflowSquare07Icon} size={16} />
+            <AppIcon icon={LeftToRightListStarIcon} size={16} />
             {title}
           </div>
           {meta ? <div className="mt-1 text-xs text-zinc-400">{meta}</div> : null}
@@ -148,7 +163,7 @@ function RuntimeLogsPanel({ logs, emptyLabel, title }: { logs: RuntimeLog[]; emp
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col border border-zinc-700 bg-zinc-900 p-4 text-zinc-100">
       <div className="mb-3 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-400">
-        <AppIcon icon={WorkflowSquare07Icon} size={16} />
+        <AppIcon icon={LeftToRightListStarIcon} size={16} />
         {title}
       </div>
       <pre ref={ref} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all font-mono text-sm leading-6 text-zinc-200">
@@ -521,11 +536,16 @@ export function ServiceModal({
   const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
   const visibleTabs = ([
     ["deployments", PackageIcon],
-    ["logs", WorkflowSquare07Icon],
-    ["environment", Settings01Icon],
+    ["logs", LeftToRightListStarIcon],
+    ["environment", VariableIcon],
     ["domains", Globe02Icon],
+    ["data", DatabaseIcon],
+    ["sql", VideoConsoleIcon],
     ["settings", GithubIcon]
-  ] as Array<[ModalTab, unknown]>).filter(([tab]) => !isDatabase || tab !== "domains");
+  ] as Array<[ModalTab, unknown]>).filter(([tab]) => {
+    if (isDatabase) return tab !== "domains";
+    return tab !== "data" && tab !== "sql";
+  });
   const deployments = overview?.deployments ?? [];
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
@@ -536,10 +556,13 @@ export function ServiceModal({
       : null;
 
   useEffect(() => {
+    if (!service) return;
     if (isDatabase && selectedTab === "domains") {
       onTabChange("deployments");
+    } else if (!isDatabase && (selectedTab === "data" || selectedTab === "sql")) {
+      onTabChange("deployments");
     }
-  }, [isDatabase, onTabChange, selectedTab]);
+  }, [isDatabase, onTabChange, selectedTab, service]);
 
   return (
     <>
@@ -604,14 +627,14 @@ export function ServiceModal({
               {visibleTabs.map(([tab, icon]) => (
                 <button key={tab} type="button" className={chipClass(selectedTab === tab)} onClick={() => onTabChange(tab)}>
                   <AppIcon icon={icon} size={15} />
-                  <span className="capitalize">{tab}</span>
+                  <span>{modalTabLabels[tab]}</span>
                 </button>
               ))}
             </div>
 
             {error ? <div className="mt-3 border border-rose-500/25 bg-rose-950/20 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
 
-            <div className={`mt-4 min-h-0 flex-1 pr-1 ${selectedTab === "deployments" || selectedTab === "logs" ? "overflow-hidden" : "overflow-y-auto"}`}>
+            <div className={`mt-4 min-h-0 flex-1 pr-1 ${selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql" ? "overflow-hidden" : "overflow-y-auto"}`}>
               {selectedTab === "deployments" ? (
                 <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
                   <div className="min-h-0 overflow-y-auto pr-1 lg:w-[340px] lg:flex-none">
@@ -688,6 +711,10 @@ export function ServiceModal({
               ) : null}
 
               {selectedTab === "logs" ? <RuntimeLogsPanel logs={runtimeLogs} title="Live service logs" emptyLabel="No runtime logs yet." /> : null}
+
+              {selectedTab === "data" && isDatabase ? <DatabaseBrowserPanel serviceId={serviceId} /> : null}
+
+              {selectedTab === "sql" && isDatabase ? <DatabaseSqlConsolePanel serviceId={serviceId} /> : null}
 
               {selectedTab === "environment" ? (
                 <div className="space-y-5">
