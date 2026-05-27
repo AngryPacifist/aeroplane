@@ -1,6 +1,7 @@
 import { Refresh03Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type DatabaseColumn, type DatabaseRow, type DatabaseRowFilter, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
+import { Dropdown } from "../ui/dropdown";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
 import { DatabaseTableGrid } from "./database-table-grid";
 
@@ -12,6 +13,13 @@ function rowValue(value: unknown) {
 function primaryKeyFor(columns: DatabaseColumn[], row: DatabaseRow) {
   const primaryColumns = columns.filter((column) => column.primaryKey);
   return Object.fromEntries(primaryColumns.map((column) => [column.name, row[column.name] ?? null]));
+}
+
+const rowCountFormatter = new Intl.NumberFormat();
+
+function tableRowCountLabel(rowCount: number | null) {
+  if (rowCount === null) return "unknown";
+  return `${rowCountFormatter.format(rowCount)} row${rowCount === 1 ? "" : "s"}`;
 }
 
 export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
@@ -29,6 +37,9 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const [insertOpen, setInsertOpen] = useState(false);
   const [insertDraft, setInsertDraft] = useState<Record<string, string>>({});
   const [appliedFilters, setAppliedFilters] = useState<DatabaseRowFilter[]>([]);
+  const [pageSize, setPageSize] = useState(50);
+  const [pageOffset, setPageOffset] = useState(0);
+  const [selectedSchema, setSelectedSchema] = useState("");
 
   const columns = rowsResult?.columns ?? [];
   const rows = rowsResult?.rows ?? [];
@@ -37,6 +48,21 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const selectedTableName = useMemo(() => {
     return tables.find((table) => table.id === selectedTable)?.name ?? selectedTable;
   }, [selectedTable, tables]);
+  const schemaOptions = useMemo(() => {
+    const names = Array.from(new Set(tables.map((table) => table.schema))).filter(Boolean);
+    return names.map((schema) => ({ value: schema, label: schema }));
+  }, [tables]);
+  const visibleTables = useMemo(() => {
+    if (!selectedSchema) return tables;
+    return tables.filter((table) => table.schema === selectedSchema);
+  }, [selectedSchema, tables]);
+
+  function preferredSchema(nextTables: DatabaseTable[]) {
+    const schemas = Array.from(new Set(nextTables.map((table) => table.schema))).filter(Boolean);
+    if (schemas.includes(selectedSchema)) return selectedSchema;
+    if (schemas.includes("public")) return "public";
+    return schemas[0] ?? "";
+  }
 
   async function loadTables() {
     setBusy("tables");
@@ -47,7 +73,12 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
       setEditable(result.editable);
       setTables(result.tables);
       setMessage(result.message ?? "");
-      setSelectedTable(result.tables[0]?.id || "");
+      const nextSchema = preferredSchema(result.tables);
+      const nextSelectedTable = result.tables.find((table) => table.id === selectedTable && table.schema === nextSchema)?.id
+        ?? result.tables.find((table) => table.schema === nextSchema)?.id
+        ?? "";
+      setSelectedSchema(nextSchema);
+      setSelectedTable(nextSelectedTable);
       if (result.tables.length === 0) setRowsResult(null);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not load database tables");
@@ -56,14 +87,16 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     }
   }
 
-  async function loadRows(table = selectedTable, filters = appliedFilters) {
+  async function loadRows(table = selectedTable, filters = appliedFilters, offset = pageOffset, limit = pageSize) {
     if (!table) return;
     setBusy("rows");
     setError("");
     try {
-      const result = await api.databaseRows(serviceId, table, 50, 0, filters);
+      const result = await api.databaseRows(serviceId, table, limit, offset, filters);
       setRowsResult(result);
       setEditable(result.editable);
+      setPageSize(result.limit);
+      setPageOffset(result.offset);
       setEditingIndex(null);
       setInsertOpen(false);
       setInsertError("");
@@ -74,14 +107,36 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     }
   }
 
+  function adjustTableRowCount(tableId: string, delta: number) {
+    setTables((current) => current.map((table) => (
+      table.id === tableId && table.rowCount !== null
+        ? { ...table, rowCount: Math.max(0, table.rowCount + delta) }
+        : table
+    )));
+  }
+
+  function changeSchema(schema: string) {
+    setSelectedSchema(schema);
+    setSelectedTable(tables.find((table) => table.schema === schema)?.id ?? "");
+    setRowsResult(null);
+    setAppliedFilters([]);
+    setPageOffset(0);
+  }
+
   useEffect(() => {
+    setSelectedTable("");
+    setSelectedSchema("");
+    setRowsResult(null);
+    setAppliedFilters([]);
+    setPageOffset(0);
     void loadTables();
   }, [serviceId]);
 
   useEffect(() => {
     if (selectedTable) {
       setAppliedFilters([]);
-      void loadRows(selectedTable, []);
+      setPageOffset(0);
+      void loadRows(selectedTable, [], 0, pageSize);
     }
   }, [selectedTable]);
 
@@ -101,7 +156,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         primaryKey: primaryKeyFor(columns, row),
         values: draftRow
       });
-      await loadRows(rowsResult.table, appliedFilters);
+      await loadRows(rowsResult.table, appliedFilters, pageOffset, pageSize);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not save row");
     } finally {
@@ -120,7 +175,9 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           primaryKey: primaryKeyFor(columns, row)
         });
       }
-      await loadRows(rowsResult.table, appliedFilters);
+      const nextOffset = rowsToDelete.length >= rows.length ? Math.max(0, pageOffset - pageSize) : pageOffset;
+      adjustTableRowCount(rowsResult.table, -rowsToDelete.length);
+      await loadRows(rowsResult.table, appliedFilters, nextOffset, pageSize);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not delete selected rows");
     } finally {
@@ -138,7 +195,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         table: rowsResult.table,
         values: insertDraft
       });
-      await loadRows(rowsResult.table, appliedFilters);
+      adjustTableRowCount(rowsResult.table, 1);
+      await loadRows(rowsResult.table, appliedFilters, pageOffset, pageSize);
     } catch (issue) {
       setInsertError(issue instanceof Error ? issue.message : "Could not insert row");
     } finally {
@@ -164,10 +222,22 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             <AppIcon icon={Refresh03Icon} size={15} />
           </button>
         </div>
+        <div className="border-b border-zinc-800 p-3">
+          <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Schema</div>
+          <Dropdown
+            value={selectedSchema}
+            options={schemaOptions}
+            onChange={changeSchema}
+            disabled={schemaOptions.length === 0 || busy === "tables"}
+            placeholder="Select schema"
+          />
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {tables.length === 0 ? (
             <div className="px-4 py-5 text-sm text-zinc-500">No tables found.</div>
-          ) : tables.map((table) => (
+          ) : visibleTables.length === 0 ? (
+            <div className="px-4 py-5 text-sm text-zinc-500">No tables in this schema.</div>
+          ) : visibleTables.map((table) => (
             <button
               key={table.id}
               type="button"
@@ -175,7 +245,10 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
               onClick={() => setSelectedTable(table.id)}
             >
               <span className="block truncate font-medium">{table.name}</span>
-              <span className="mt-1 block truncate font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">{table.schema}</span>
+              <span className="mt-1 flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                <span className="min-w-0 truncate">{table.schema}</span>
+                <span className="shrink-0 text-zinc-400">{tableRowCountLabel(table.rowCount)}</span>
+              </span>
             </button>
           ))}
         </div>
@@ -185,10 +258,12 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
           <div>
             <h3 className="font-hero text-xl text-zinc-100">{selectedTableName || "Data"}</h3>
-            <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">{rows.length} loaded rows</div>
+            <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+              {rowsResult ? `${rowsResult.totalRows} total rows` : `${rows.length} loaded rows`}
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className={shellButton("ghost")} onClick={() => void loadRows(selectedTable, appliedFilters)} disabled={!selectedTable || busy === "rows"}>
+            <button type="button" className={shellButton("ghost")} onClick={() => void loadRows(selectedTable, appliedFilters, pageOffset, pageSize)} disabled={!selectedTable || busy === "rows"}>
               <AppIcon icon={Refresh03Icon} size={15} />
               Refresh
             </button>
@@ -202,7 +277,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           </div>
         ) : null}
 
-        {columns.length === 0 ? (
+        {!rowsResult || columns.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center border border-zinc-800 bg-zinc-950/45 px-5 py-8 text-sm text-zinc-500">
             {busy ? "Loading table..." : "Choose a table to inspect rows."}
           </div>
@@ -216,6 +291,20 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             editingIndex={editingIndex}
             draftRow={draftRow}
             appliedFilters={appliedFilters}
+            pagination={{
+              limit: rowsResult.limit,
+              offset: rowsResult.offset,
+              totalRows: rowsResult.totalRows,
+              onPageChange: (offset) => {
+                setPageOffset(offset);
+                void loadRows(rowsResult.table, appliedFilters, offset, rowsResult.limit);
+              },
+              onPageSizeChange: (limit) => {
+                setPageSize(limit);
+                setPageOffset(0);
+                void loadRows(rowsResult.table, appliedFilters, 0, limit);
+              }
+            }}
             onAddRecord={() => {
               setInsertDraft(Object.fromEntries(columns.map((column) => [column.name, ""])));
               setInsertError("");
@@ -227,7 +316,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             onDraftChange={(column, value) => setDraftRow((current) => ({ ...current, [column]: value }))}
             onApplyFilters={(filters) => {
               setAppliedFilters(filters);
-              void loadRows(rowsResult?.table ?? selectedTable, filters);
+              setPageOffset(0);
+              void loadRows(rowsResult?.table ?? selectedTable, filters, 0, pageSize);
             }}
             onSaveEdit={(row) => void saveEdit(row)}
           />
