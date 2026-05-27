@@ -75,6 +75,50 @@ export type RuntimeLog = {
   createdAt: string;
 };
 
+export type DatabaseRowValue = null | boolean | number | string;
+
+export type DatabaseRow = Record<string, DatabaseRowValue>;
+
+export type DatabaseTable = {
+  id: string;
+  schema: string;
+  name: string;
+};
+
+export type DatabaseColumn = {
+  name: string;
+  type: string;
+  nullable: boolean;
+  primaryKey: boolean;
+};
+
+export type DatabaseTablesResponse = {
+  engine: string;
+  supported: boolean;
+  editable: boolean;
+  tables: DatabaseTable[];
+  message?: string;
+};
+
+export type DatabaseRowsResponse = {
+  engine: string;
+  editable: boolean;
+  table: string;
+  columns: DatabaseColumn[];
+  rows: DatabaseRow[];
+  limit: number;
+  offset: number;
+};
+
+export type DatabaseQueryResult = {
+  engine: string;
+  columns: string[];
+  rows: DatabaseRow[];
+  rowCount: number;
+  message?: string;
+  elapsedMs: number;
+};
+
 export type EnvVar = {
   id: string;
   key: string;
@@ -223,6 +267,23 @@ export const api = {
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" }),
   updateDomain: (serviceId: string, domainId: string, body: { hostname: string }) =>
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  databaseTables: (serviceId: string) =>
+    request<DatabaseTablesResponse>(`/api/services/${serviceId}/database/tables`),
+  databaseRows: (serviceId: string, table: string, limit = 50, offset = 0) =>
+    request<DatabaseRowsResponse>(
+      `/api/services/${serviceId}/database/rows?table=${encodeURIComponent(table)}&limit=${limit}&offset=${offset}`
+    ),
+  databaseQuery: (serviceId: string, sql: string) =>
+    request<DatabaseQueryResult>(`/api/services/${serviceId}/database/query`, {
+      method: "POST",
+      body: JSON.stringify({ sql })
+    }),
+  insertDatabaseRow: (serviceId: string, body: { table: string; values: DatabaseRow }) =>
+    request(`/api/services/${serviceId}/database/rows`, { method: "POST", body: JSON.stringify(body) }),
+  updateDatabaseRow: (serviceId: string, body: { table: string; primaryKey: DatabaseRow; values: DatabaseRow }) =>
+    request(`/api/services/${serviceId}/database/rows`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteDatabaseRow: (serviceId: string, body: { table: string; primaryKey: DatabaseRow }) =>
+    request(`/api/services/${serviceId}/database/rows`, { method: "DELETE", body: JSON.stringify(body) }),
   railwayProjects: (apiToken: string) =>
     request<{ projects: Array<{ id: string; name: string; description: string; serviceCount: number }> }>(
       "/api/integrations/railway/projects",
