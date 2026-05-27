@@ -31,13 +31,13 @@ import {
   BrowserIconFallback,
   FieldLabel,
   FormInput,
-  FormSelect,
   SectionTitle,
   StatusPill,
   chipClass,
   deploymentCardClass,
   shellButton
 } from "../ui/primitives";
+import { Dropdown } from "../ui/dropdown";
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from "../../lib/github-cache";
 import { DirectoryPickerModal } from "./directory-picker";
@@ -736,14 +736,11 @@ export function CreateServiceModal({
                   </div>
                   <div>
                     <FieldLabel>Branch</FieldLabel>
-                    <FormSelect value={form.branch} onChange={(event) => setForm((current) => ({ ...current, branch: event.target.value }))}>
-                      {branches.length === 0 ? <option value={form.branch || "main"}>{form.branch || "main"}</option> : null}
-                      {branches.map((branch) => (
-                        <option key={branch} value={branch}>
-                          {branch}
-                        </option>
-                      ))}
-                    </FormSelect>
+                    <Dropdown
+                      value={form.branch}
+                      options={(branches.length === 0 ? [form.branch || "main"] : branches).map((branch) => ({ value: branch, label: branch }))}
+                      onChange={(branch) => setForm((current) => ({ ...current, branch }))}
+                    />
                   </div>
                   <div>
                     <FieldLabel>App port</FieldLabel>
