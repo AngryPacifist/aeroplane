@@ -11,7 +11,9 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { api } from "../../api";
 import { ModalShell } from "../../components/modals/modal-shell";
-import { AppIcon, FieldLabel, FormInput, FormSelect, shellButton } from "../../components/ui/primitives";
+import { Checkbox } from "../../components/ui/checkbox";
+import { Dropdown } from "../../components/ui/dropdown";
+import { AppIcon, FieldLabel, FormInput, shellButton } from "../../components/ui/primitives";
 
 interface RailwayProject {
   id: string;
@@ -206,17 +208,17 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
               autoComplete="new-password"
               required
             />
-            <div className="flex items-center gap-2 mt-3 select-none">
-              <input
-                type="checkbox"
-                id="remember-token"
+            <div className="mt-3">
+              <Checkbox
                 checked={rememberToken}
-                onChange={(e) => setRememberToken(e.target.checked)}
-                className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
-              />
-              <label htmlFor="remember-token" className="text-xs text-zinc-400 cursor-pointer font-mono uppercase tracking-wider">
-                Remember my Railway token
-              </label>
+                onChange={setRememberToken}
+                disabled={busy}
+                label="Remember my Railway token"
+              >
+                <span className="font-mono text-xs uppercase tracking-wider text-zinc-400">
+                  Remember my Railway token
+                </span>
+              </Checkbox>
             </div>
           </div>
 
@@ -315,48 +317,39 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
           <div className="grid grid-cols-2 gap-4">
             <div>
               <FieldLabel>Target Environment</FieldLabel>
-              <FormSelect
+              <Dropdown
                 value={selectedEnvironmentId}
-                onChange={(e) => setSelectedEnvironmentId(e.target.value)}
+                onChange={setSelectedEnvironmentId}
                 disabled={busy}
-              >
-                {projectDetails.environments.map((env) => (
-                  <option key={env.id} value={env.id}>
-                    {env.name}
-                  </option>
-                ))}
-              </FormSelect>
+                options={projectDetails.environments.map((env) => ({ value: env.id, label: env.name }))}
+              />
               <div className="text-[10px] text-zinc-500 font-mono mt-1 uppercase tracking-wider">
                 Pull app variables and commands from this env
               </div>
             </div>
 
             <div className="flex flex-col justify-end space-y-2.5 pb-1">
-              <label className="flex items-center gap-2 select-none cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={excludeRailwayVars}
-                  onChange={(e) => setExcludeRailwayVars(e.target.checked)}
-                  disabled={busy}
-                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
-                />
+              <Checkbox
+                checked={excludeRailwayVars}
+                onChange={setExcludeRailwayVars}
+                disabled={busy}
+                label="Exclude RAILWAY_* variables"
+              >
                 <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
                   Exclude RAILWAY_* variables
                 </span>
-              </label>
+              </Checkbox>
 
-              <label className="flex items-center gap-2 select-none cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={importDatabases}
-                  onChange={(e) => setImportDatabases(e.target.checked)}
-                  disabled={busy}
-                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
-                />
+              <Checkbox
+                checked={importDatabases}
+                onChange={setImportDatabases}
+                disabled={busy}
+                label="Recreate database engines"
+              >
                 <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
                   Recreate database engines
                 </span>
-              </label>
+              </Checkbox>
             </div>
           </div>
 
@@ -370,26 +363,24 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
                   const isDb = lowercase.includes("postgres") || lowercase.includes("mysql") || lowercase.includes("redis") || lowercase.includes("mongo");
                   
                   return (
-                    <label
+                    <div
                       key={service.id}
-                      className="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/40 cursor-pointer select-none transition-colors"
+                      className="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/40 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {
-                            if (isChecked) {
-                              setSelectedServiceIds(selectedServiceIds.filter(id => id !== service.id));
-                            } else {
-                              setSelectedServiceIds([...selectedServiceIds, service.id]);
-                            }
-                          }}
-                          disabled={busy}
-                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#E93D82] focus:ring-[#E93D82] focus:ring-offset-zinc-900 focus:outline-none"
-                        />
+                      <Checkbox
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked) {
+                            setSelectedServiceIds(selectedServiceIds.filter(id => id !== service.id));
+                          } else {
+                            setSelectedServiceIds([...selectedServiceIds, service.id]);
+                          }
+                        }}
+                        disabled={busy}
+                        label={`Select ${service.name}`}
+                      >
                         <span className="text-xs font-semibold text-zinc-100 font-mono">{service.name}</span>
-                      </div>
+                      </Checkbox>
                       <span className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${
                         isDb 
                           ? "border-[#4FB8B2]/30 bg-[#4FB8B2]/5 text-[#4FB8B2]" 
@@ -397,7 +388,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
                       }`}>
                         {isDb ? "Database" : "App Service"}
                       </span>
-                    </label>
+                    </div>
                   );
                 })}
               </div>
