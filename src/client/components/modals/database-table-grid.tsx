@@ -1,19 +1,14 @@
-import {
-  Add01Icon,
-  Delete02Icon,
-  FilterHorizontalIcon,
-  PencilEdit02Icon,
-  Sorting05Icon,
-  SortingDownIcon,
-  SortingUpIcon,
-  TableColumnsSplitIcon
-} from "@hugeicons/core-free-icons";
-import { useEffect, useMemo, useState } from "react";
-import type { DatabaseColumn, DatabaseRow, DatabaseRowValue } from "../../api";
+import { Add01Icon, Delete02Icon, FilterHorizontalIcon, Sorting05Icon, SortingDownIcon, SortingUpIcon, TableColumnsSplitIcon } from "@hugeicons/core-free-icons";
+import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { DatabaseColumn, DatabaseRow } from "../../api";
 import { AppIcon } from "../ui/primitives";
+import { DatabaseGridColumnsPopover } from "./database-grid-columns-popover";
+import { DatabaseGridFilterPopover } from "./database-grid-filter-popover";
+import { DatabaseGridSortPopover } from "./database-grid-sort-popover";
+import { createGridFilter, filterOperators, type EditingCell, type GridFilter, type GridSort, type GridRowItem } from "./database-grid-types";
+import { applyGridFilters, applyGridSort, displayDatabaseValue } from "./database-grid-utils";
 
 type ToolbarPanel = "filters" | "sort" | "columns" | "";
-type SortDirection = "asc" | "desc";
 
 type DatabaseTableGridProps = {
   columns: DatabaseColumn[];
@@ -26,7 +21,7 @@ type DatabaseTableGridProps = {
   onAddRecord: () => void;
   onBeginEdit: (index: number) => void;
   onCancelEdit: () => void;
-  onDeleteRow: (row: DatabaseRow) => void;
+  onDeleteRows: (rows: DatabaseRow[]) => void;
   onDraftChange: (column: string, value: string) => void;
   onSaveEdit: (row: DatabaseRow) => void;
 };
@@ -34,23 +29,14 @@ type DatabaseTableGridProps = {
 function toolbarButton(active: boolean) {
   return `inline-flex h-10 items-center justify-center gap-2 border px-3 text-sm font-medium transition ${
     active
-      ? "border-[#4FB8B2]/45 bg-[#4FB8B2]/12 text-[#7fe3dd]"
-      : "border-zinc-700 bg-zinc-950/70 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900"
+      ? "border-zinc-500 bg-zinc-800 text-white"
+      : "border-zinc-700 bg-zinc-950/75 text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900"
   }`;
 }
 
-function compareValues(left: DatabaseRowValue | undefined, right: DatabaseRowValue | undefined) {
-  if (left === right) return 0;
-  if (left === null || left === undefined) return 1;
-  if (right === null || right === undefined) return -1;
-  if (typeof left === "number" && typeof right === "number") return left - right;
-  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
-}
-
-function displayValue(value: DatabaseRowValue | undefined) {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "boolean") return value ? "true" : "false";
-  return String(value);
+function isActiveFilter(filter: GridFilter) {
+  const operator = filterOperators.find((item) => item.value === filter.operator);
+  return Boolean(filter.column && (operator?.requiresValue === false || filter.value.trim()));
 }
 
 export function DatabaseTableGrid({
@@ -64,47 +50,46 @@ export function DatabaseTableGrid({
   onAddRecord,
   onBeginEdit,
   onCancelEdit,
-  onDeleteRow,
+  onDeleteRows,
   onDraftChange,
   onSaveEdit
 }: DatabaseTableGridProps) {
+  const skipBlurCommitRef = useRef(false);
   const [activePanel, setActivePanel] = useState<ToolbarPanel>("");
-  const [filterText, setFilterText] = useState("");
-  const [sortColumn, setSortColumn] = useState("");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [filters, setFilters] = useState<GridFilter[]>(() => [createGridFilter(columns)]);
+  const [sort, setSort] = useState<GridSort | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set());
   const [selectedRows, setSelectedRows] = useState<Set<number>>(() => new Set());
+  const [editingCell, setEditingCell] = useState<EditingCell>(null);
 
   useEffect(() => {
     const columnNames = new Set(columns.map((column) => column.name));
     setHiddenColumns((current) => new Set(Array.from(current).filter((name) => columnNames.has(name))));
     setSelectedRows(new Set<number>());
-    setSortColumn((current) => (current && columnNames.has(current) ? current : ""));
+    setEditingCell(null);
+    setFilters((current) => {
+      const nextFilters = current.map((filter) => (columnNames.has(filter.column) ? filter : { ...filter, column: columns[0]?.name ?? "" }));
+      return nextFilters.length > 0 ? nextFilters : [createGridFilter(columns)];
+    });
+    setSort((current) => (current && columnNames.has(current.column) ? current : null));
   }, [columns, rows]);
 
+  useEffect(() => {
+    if (editingIndex === null) setEditingCell(null);
+  }, [editingIndex]);
+
   const visibleColumns = useMemo(() => columns.filter((column) => !hiddenColumns.has(column.name)), [columns, hiddenColumns]);
-
-  const visibleRows = useMemo(() => {
-    const normalizedFilter = filterText.trim().toLowerCase();
-    const filtered = rows
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => {
-        if (!normalizedFilter) return true;
-        return columns.some((column) => displayValue(row[column.name]).toLowerCase().includes(normalizedFilter));
-      });
-
-    if (!sortColumn) return filtered;
-
-    return [...filtered].sort((left, right) => {
-      const result = compareValues(left.row[sortColumn], right.row[sortColumn]);
-      return sortDirection === "asc" ? result : -result;
-    });
-  }, [columns, filterText, rows, sortColumn, sortDirection]);
-
+  const visibleRows = useMemo(() => applyGridSort(applyGridFilters(rows, columns, filters), sort), [columns, filters, rows, sort]);
+  const selectedItems = useMemo<GridRowItem[]>(() => rows.map((row, index) => ({ row, index })).filter(({ index }) => selectedRows.has(index)), [rows, selectedRows]);
+  const activeFilterCount = filters.filter(isActiveFilter).length;
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every(({ index }) => selectedRows.has(index));
 
   function togglePanel(panel: ToolbarPanel) {
-    setActivePanel((current) => (current === panel ? "" : panel));
+    if (panel === "filters" && filters.length === 0) setFilters([createGridFilter(columns)]);
+    setActivePanel((current) => {
+      if (current === panel) return "";
+      return panel;
+    });
   }
 
   function toggleColumn(column: string) {
@@ -140,27 +125,91 @@ export function DatabaseTableGrid({
     });
   }
 
+  function deleteSelectedRows() {
+    if (selectedItems.length === 0 || !hasPrimaryKey) return;
+    onDeleteRows(selectedItems.map((item) => item.row));
+  }
+
+  function startCellEdit(rowIndex: number, column: string) {
+    if (!editable || !hasPrimaryKey) return;
+    skipBlurCommitRef.current = false;
+    onBeginEdit(rowIndex);
+    setEditingCell({ rowIndex, column });
+  }
+
+  function commitCell(row: DatabaseRow) {
+    if (!editingCell) return;
+    if (skipBlurCommitRef.current) {
+      skipBlurCommitRef.current = false;
+      return;
+    }
+    setEditingCell(null);
+    onSaveEdit(row);
+  }
+
+  function cancelCellEdit() {
+    skipBlurCommitRef.current = true;
+    setEditingCell(null);
+    onCancelEdit();
+  }
+
+  function handleEditKeyDown(event: KeyboardEvent<HTMLInputElement>, row: DatabaseRow) {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    } else if (event.key === "Escape") {
+      cancelCellEdit();
+    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      commitCell(row);
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button type="button" className={toolbarButton(activePanel === "filters")} onClick={() => togglePanel("filters")}>
-          <AppIcon icon={FilterHorizontalIcon} size={17} />
-          Filters
-          {filterText ? <span className="text-[#7fe3dd]">1</span> : null}
-        </button>
-        <button type="button" className={toolbarButton(activePanel === "sort")} onClick={() => togglePanel("sort")}>
-          <AppIcon icon={Sorting05Icon} size={17} />
-          Sort
-          {sortColumn ? <span className="text-[#7fe3dd]">1</span> : null}
-        </button>
-        <button type="button" className={toolbarButton(activePanel === "columns")} onClick={() => togglePanel("columns")}>
-          <AppIcon icon={TableColumnsSplitIcon} size={17} />
-          Columns
-        </button>
+        <div className="relative">
+          <button type="button" className={toolbarButton(activePanel === "filters")} onClick={() => togglePanel("filters")}>
+            <AppIcon icon={FilterHorizontalIcon} size={17} />
+            Filters
+            {activeFilterCount > 0 ? <span className="text-zinc-400">{activeFilterCount}</span> : null}
+          </button>
+        </div>
+
+        <div className="relative">
+          <button type="button" className={toolbarButton(activePanel === "sort")} onClick={() => togglePanel("sort")}>
+            <AppIcon icon={Sorting05Icon} size={17} />
+            Sort
+            {sort ? <span className="text-zinc-400">1</span> : null}
+          </button>
+          {activePanel === "sort" ? <DatabaseGridSortPopover columns={columns} sort={sort} onSortChange={setSort} /> : null}
+        </div>
+
+        <div className="relative">
+          <button type="button" className={toolbarButton(activePanel === "columns")} onClick={() => togglePanel("columns")}>
+            <AppIcon icon={TableColumnsSplitIcon} size={17} />
+            Columns
+          </button>
+          {activePanel === "columns" ? (
+            <DatabaseGridColumnsPopover columns={columns} hiddenColumns={hiddenColumns} visibleCount={visibleColumns.length} onToggleColumn={toggleColumn} />
+          ) : null}
+        </div>
+
+        {selectedItems.length > 0 ? (
+          <button
+            type="button"
+            className="inline-flex h-10 items-center justify-center gap-2 border border-rose-500/35 bg-rose-500/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-50"
+            onClick={deleteSelectedRows}
+            disabled={!hasPrimaryKey || busy === "delete"}
+          >
+            <AppIcon icon={Delete02Icon} size={17} />
+            Delete {selectedItems.length}
+          </button>
+        ) : null}
+
         {editable ? (
           <button
             type="button"
-            className="ml-auto inline-flex h-10 items-center justify-center gap-2 border border-[#4FB8B2]/40 bg-[#123b36] px-4 text-sm font-medium text-[#7fe3dd] transition hover:bg-[#174b45]"
+            className="ml-auto inline-flex h-10 items-center justify-center gap-2 border border-zinc-600 bg-zinc-800 px-4 text-sm font-medium text-zinc-100 transition hover:bg-zinc-700"
             onClick={onAddRecord}
           >
             <AppIcon icon={Add01Icon} size={17} />
@@ -169,155 +218,78 @@ export function DatabaseTableGrid({
         ) : null}
       </div>
 
-      {activePanel ? (
-        <div className="mb-3 border border-zinc-800 bg-zinc-950/70 p-3">
-          {activePanel === "filters" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                value={filterText}
-                onChange={(event) => setFilterText(event.target.value)}
-                placeholder="Filter records..."
-                className="h-10 min-w-[260px] flex-1 border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-[#4FB8B2]/60"
-              />
-              {filterText ? (
-                <button type="button" className={toolbarButton(false)} onClick={() => setFilterText("")}>
-                  Clear
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+      {activePanel === "filters" ? <DatabaseGridFilterPopover columns={columns} filters={filters} onFiltersChange={setFilters} floating={false} /> : null}
 
-          {activePanel === "sort" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <select
-                value={sortColumn}
-                onChange={(event) => setSortColumn(event.target.value)}
-                className="h-10 min-w-[220px] border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-[#4FB8B2]/60"
-              >
-                <option value="">No sort</option>
-                {columns.map((column) => (
-                  <option key={column.name} value={column.name}>{column.name}</option>
-                ))}
-              </select>
-              <button type="button" className={toolbarButton(sortDirection === "asc")} onClick={() => setSortDirection("asc")} disabled={!sortColumn}>
-                <AppIcon icon={SortingUpIcon} size={16} />
-                Asc
-              </button>
-              <button type="button" className={toolbarButton(sortDirection === "desc")} onClick={() => setSortDirection("desc")} disabled={!sortColumn}>
-                <AppIcon icon={SortingDownIcon} size={16} />
-                Desc
-              </button>
-            </div>
-          ) : null}
-
-          {activePanel === "columns" ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {columns.map((column) => {
-                const visible = !hiddenColumns.has(column.name);
-                return (
-                  <label key={column.name} className="flex cursor-pointer items-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-sm text-zinc-200">
-                    <input
-                      type="checkbox"
-                      checked={visible}
-                      onChange={() => toggleColumn(column.name)}
-                      disabled={visible && visibleColumns.length === 1}
-                      className="h-4 w-4 accent-[#4FB8B2]"
-                    />
-                    <span className="truncate">{column.name}</span>
-                    <span className="ml-auto truncate font-mono text-[10px] text-zinc-500">{column.type}</span>
-                  </label>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto border border-[#26323d] bg-[#090f12]">
+      <div className="min-h-0 flex-1 overflow-auto border border-zinc-700 bg-zinc-950">
         <table className="min-w-full border-collapse text-left font-mono text-sm">
-          <thead className="sticky top-0 z-10 bg-[#0b1116] text-zinc-400">
+          <thead className="sticky top-0 z-10 bg-zinc-950 text-zinc-400">
             <tr>
-              <th className="w-11 border-b border-r border-[#26323d] px-3 py-2">
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleRows} className="h-4 w-4 accent-[#4FB8B2]" aria-label="Select visible records" />
+              <th className="w-11 border-b border-r border-zinc-700 px-3 py-2">
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleRows} className="h-4 w-4 accent-zinc-500" aria-label="Select visible records" />
               </th>
               {visibleColumns.map((column) => {
-                const sorted = sortColumn === column.name;
+                const sorted = sort?.column === column.name;
                 return (
-                  <th key={column.name} className="min-w-[220px] border-b border-r border-[#26323d] px-4 py-3 font-semibold">
+                  <th key={column.name} className="min-w-[220px] border-b border-r border-zinc-700 px-4 py-3 font-semibold">
                     <button
                       type="button"
                       className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
-                      onClick={() => {
-                        setSortColumn(column.name);
-                        setSortDirection((current) => (sorted && current === "asc" ? "desc" : "asc"));
-                      }}
+                      onClick={() => setSort({ column: column.name, direction: sorted && sort?.direction === "asc" ? "desc" : "asc" })}
                     >
                       <span className="min-w-0 truncate">
                         <span className="text-zinc-300">{column.name}</span>
                         <span className="ml-2 text-zinc-500">{column.type}</span>
-                        {column.primaryKey ? <span className="ml-2 text-[#7fe3dd]">pk</span> : null}
+                        {column.primaryKey ? <span className="ml-2 text-zinc-500">pk</span> : null}
                       </span>
-                      <AppIcon icon={sorted ? (sortDirection === "asc" ? SortingUpIcon : SortingDownIcon) : Sorting05Icon} size={15} className={sorted ? "text-[#7fe3dd]" : "text-zinc-500"} />
+                      <AppIcon icon={sorted ? (sort?.direction === "asc" ? SortingUpIcon : SortingDownIcon) : Sorting05Icon} size={15} className={sorted ? "text-zinc-300" : "text-zinc-600"} />
                     </button>
                   </th>
                 );
               })}
-              {editable ? <th className="sticky right-0 w-28 border-b border-[#26323d] bg-[#0b1116] px-3 py-3 text-right text-zinc-500">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
             {visibleRows.length === 0 ? (
               <tr>
-                <td colSpan={visibleColumns.length + (editable ? 2 : 1)} className="px-4 py-8 text-sm text-zinc-500">
-                  {filterText ? "No records match this filter." : "No rows returned."}
+                <td colSpan={visibleColumns.length + 1} className="px-4 py-8 text-sm text-zinc-500">
+                  {activeFilterCount > 0 ? "No records match these filters." : "No rows returned."}
                 </td>
               </tr>
             ) : visibleRows.map(({ row, index }) => {
-              const editing = editingIndex === index;
               const selected = selectedRows.has(index);
               return (
-                <tr key={index} className={`group border-b border-[#26323d] ${selected ? "bg-[#4FB8B2]/10" : "odd:bg-[#090f12] even:bg-[#0d1519] hover:bg-[#162127]"}`}>
-                  <td className="w-11 border-r border-[#26323d] px-3 py-3">
-                    <input type="checkbox" checked={selected} onChange={() => toggleRow(index)} className="h-4 w-4 accent-[#4FB8B2]" aria-label={`Select record ${index + 1}`} />
+                <tr key={index} className={`border-b border-zinc-800 ${selected ? "bg-zinc-800" : "odd:bg-zinc-950 even:bg-zinc-900/45 hover:bg-zinc-800/60"}`}>
+                  <td className="w-11 border-r border-zinc-800 px-3 py-3">
+                    <input type="checkbox" checked={selected} onChange={() => toggleRow(index)} className="h-4 w-4 accent-zinc-500" aria-label={`Select record ${index + 1}`} />
                   </td>
                   {visibleColumns.map((column) => {
                     const value = row[column.name];
                     const empty = value === null || value === undefined;
+                    const activeCell = editingCell?.rowIndex === index && editingCell.column === column.name && editingIndex === index;
                     return (
-                      <td key={column.name} className="min-w-[220px] max-w-[320px] border-r border-[#26323d] px-4 py-3 align-middle text-zinc-200">
-                        {editing ? (
+                      <td
+                        key={column.name}
+                        className="min-w-[220px] max-w-[320px] border-r border-zinc-800 px-4 py-3 align-middle text-zinc-200"
+                        onDoubleClick={() => startCellEdit(index, column.name)}
+                      >
+                        {activeCell ? (
                           <input
+                            autoFocus
                             value={draftRow[column.name] ?? ""}
+                            onBlur={() => commitCell(row)}
                             onChange={(event) => onDraftChange(column.name, event.target.value)}
-                            className="h-9 w-full border border-zinc-700 bg-zinc-950 px-2 text-zinc-100 outline-none focus:border-[#4FB8B2]/60"
+                            onFocus={(event) => event.currentTarget.select()}
+                            onKeyDown={(event) => handleEditKeyDown(event, row)}
+                            className="h-9 w-full border border-zinc-600 bg-zinc-950 px-2 text-zinc-100 outline-none focus:border-zinc-400"
                           />
                         ) : (
-                          <span className={`block truncate ${empty ? "text-zinc-600" : ""}`} title={displayValue(value)}>
-                            {displayValue(value)}
+                          <span className={`block truncate ${empty ? "text-zinc-600" : ""}`} title={displayDatabaseValue(value)}>
+                            {displayDatabaseValue(value)}
                           </span>
                         )}
                       </td>
                     );
                   })}
-                  {editable ? (
-                    <td className="sticky right-0 w-28 bg-inherit px-3 py-3 text-right">
-                      {editing ? (
-                        <div className="flex justify-end gap-2">
-                          <button type="button" className="text-[#7fe3dd]" onClick={() => onSaveEdit(row)} disabled={busy === "edit"}>Save</button>
-                          <button type="button" className="text-zinc-400" onClick={onCancelEdit}>Cancel</button>
-                        </div>
-                      ) : (
-                        <div className="flex justify-end gap-2 opacity-70 transition group-hover:opacity-100">
-                          <button type="button" className="text-zinc-400 hover:text-[#7fe3dd] disabled:opacity-40" onClick={() => onBeginEdit(index)} disabled={!hasPrimaryKey} aria-label="Edit row">
-                            <AppIcon icon={PencilEdit02Icon} size={15} />
-                          </button>
-                          <button type="button" className="text-zinc-500 hover:text-rose-300 disabled:opacity-40" onClick={() => onDeleteRow(row)} disabled={!hasPrimaryKey} aria-label="Delete row">
-                            <AppIcon icon={Delete02Icon} size={15} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  ) : null}
                 </tr>
               );
             })}
