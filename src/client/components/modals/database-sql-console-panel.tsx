@@ -28,7 +28,7 @@ export function DatabaseSqlConsolePanel({ serviceId }: { serviceId: string }) {
   }
 
   return (
-    <form className="flex h-full min-h-[520px] flex-col gap-4" onSubmit={runQuery}>
+    <form className="flex h-full min-h-0 flex-col gap-4" onSubmit={runQuery}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-4">
         <div>
           <h3 className="font-hero text-xl text-zinc-100">Console</h3>
@@ -47,7 +47,7 @@ export function DatabaseSqlConsolePanel({ serviceId }: { serviceId: string }) {
       {error ? <div className="border border-rose-500/30 bg-rose-950/25 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
 
       {result ? (
-        <div className="min-h-0 flex-1 space-y-3 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">
             <span>{result.rowCount} rows</span>
             <span>{result.elapsedMs}ms</span>
@@ -58,7 +58,7 @@ export function DatabaseSqlConsolePanel({ serviceId }: { serviceId: string }) {
               {result.message}
             </pre>
           ) : null}
-          <div className="max-h-[330px] overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <DatabaseResultTable columns={result.columns} rows={result.rows} emptyLabel="Query completed without returning rows." />
           </div>
         </div>
