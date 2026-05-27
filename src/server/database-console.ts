@@ -9,6 +9,7 @@ export type DatabaseTable = {
   id: string;
   schema: string;
   name: string;
+  rowCount: number | null;
 };
 
 export type DatabaseColumn = {
@@ -343,6 +344,16 @@ function unsupportedResponse(ctx: DatabaseContext) {
   };
 }
 
+async function withTableRowCounts(tables: DatabaseTable[], countRows: (tableId: string) => Promise<number>) {
+  return Promise.all(tables.map(async (table) => {
+    try {
+      return { ...table, rowCount: await countRows(table.id) };
+    } catch {
+      return { ...table, rowCount: null };
+    }
+  }));
+}
+
 export async function getDatabaseTables(serviceId: string) {
   const ctx = databaseContext(serviceId);
   if (!relationalEngines.has(ctx.dbType)) return unsupportedResponse(ctx);
@@ -358,7 +369,8 @@ export async function getDatabaseTables(serviceId: string) {
         ORDER BY table_schema, table_name
       ) t
     `);
-    return { engine: ctx.dbType, supported: true, editable: true, tables };
+    const countedTables = await withTableRowCounts(tables, (tableId) => postgresJson<number>(ctx, `SELECT count(*) FROM ${postgresTableSql(tableId)}`));
+    return { engine: ctx.dbType, supported: true, editable: true, tables: countedTables };
   }
 
   if (ctx.dbType === "mysql") {
@@ -371,9 +383,14 @@ export async function getDatabaseTables(serviceId: string) {
     const tables = parsed.rows.map((row) => ({
       id: String(row.id),
       schema: String(row.schema),
-      name: String(row.name)
+      name: String(row.name),
+      rowCount: null
     }));
-    return { engine: ctx.dbType, supported: true, editable: true, tables };
+    const countedTables = await withTableRowCounts(tables, async (tableId) => {
+      const countParsed = parseTsv(await runMysql(ctx, `SELECT COUNT(*) AS rowCount FROM ${mysqlTableSql(tableId)}`));
+      return Number(countParsed.rows[0]?.rowCount ?? 0);
+    });
+    return { engine: ctx.dbType, supported: true, editable: true, tables: countedTables };
   }
 
   const tableRows = parseJsonEachRow(await runClickHouse(ctx, `
@@ -386,9 +403,17 @@ export async function getDatabaseTables(serviceId: string) {
   const tables = tableRows.map((row) => ({
     id: String(row.id),
     schema: String(row.schema),
-    name: String(row.name)
+    name: String(row.name),
+    rowCount: null
   }));
-  return { engine: ctx.dbType, supported: true, editable: false, tables };
+  const countedTables = await withTableRowCounts(tables, async (tableId) => {
+    const countRows = parseJsonEachRow(await runClickHouse(ctx, `
+      SELECT count() AS rowCount FROM ${clickHouseTableSql(tableId)}
+      FORMAT JSONEachRow
+    `));
+    return Number(countRows[0]?.rowCount ?? 0);
+  });
+  return { engine: ctx.dbType, supported: true, editable: false, tables: countedTables };
 }
 
 export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number, filters: DatabaseRowFilter[] = []) {
@@ -423,15 +448,20 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
       ) c
     `);
     const activeFilters = activeFiltersForColumns(filters, columns);
+    const filterSql = whereClause(activeFilters, postgresFilterSql);
+    const totalRows = await postgresJson<number>(ctx, `
+      SELECT count(*) FROM ${postgresTableSql(table)}
+      ${filterSql}
+    `);
     const rows = await postgresJson<RowData[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json)
       FROM (
         SELECT * FROM ${postgresTableSql(table)}
-        ${whereClause(activeFilters, postgresFilterSql)}
+        ${filterSql}
         LIMIT ${safeLimit} OFFSET ${safeOffset}
       ) r
     `);
-    return { engine: ctx.dbType, editable: true, table, columns, rows, limit: safeLimit, offset: safeOffset };
+    return { engine: ctx.dbType, editable: true, table, columns, rows, limit: safeLimit, offset: safeOffset, totalRows };
   }
 
   if (ctx.dbType === "mysql") {
@@ -449,8 +479,11 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
       primaryKey: row.primaryKey === "true"
     }));
     const activeFilters = activeFiltersForColumns(filters, columns);
-    const parsed = parseTsv(await runMysql(ctx, `SELECT * FROM ${mysqlTableSql(table)} ${whereClause(activeFilters, mysqlFilterSql)} LIMIT ${safeLimit} OFFSET ${safeOffset}`));
-    return { engine: ctx.dbType, editable: true, table, columns, rows: parsed.rows, limit: safeLimit, offset: safeOffset };
+    const filterSql = whereClause(activeFilters, mysqlFilterSql);
+    const countParsed = parseTsv(await runMysql(ctx, `SELECT COUNT(*) AS totalRows FROM ${mysqlTableSql(table)} ${filterSql}`));
+    const totalRows = Number(countParsed.rows[0]?.totalRows ?? 0);
+    const parsed = parseTsv(await runMysql(ctx, `SELECT * FROM ${mysqlTableSql(table)} ${filterSql} LIMIT ${safeLimit} OFFSET ${safeOffset}`));
+    return { engine: ctx.dbType, editable: true, table, columns, rows: parsed.rows, limit: safeLimit, offset: safeOffset, totalRows };
   }
 
   if (ctx.dbType === "clickhouse") {
@@ -469,13 +502,20 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
       primaryKey: false
     })) as DatabaseColumn[];
     const activeFilters = activeFiltersForColumns(filters, columns);
+    const filterSql = whereClause(activeFilters, clickHouseFilterSql);
+    const countRows = parseJsonEachRow(await runClickHouse(ctx, `
+      SELECT count() AS totalRows FROM ${clickHouseTableSql(table)}
+      ${filterSql}
+      FORMAT JSONEachRow
+    `));
+    const totalRows = Number(countRows[0]?.totalRows ?? 0);
     const rows = parseJsonEachRow(await runClickHouse(ctx, `
       SELECT * FROM ${clickHouseTableSql(table)}
-      ${whereClause(activeFilters, clickHouseFilterSql)}
+      ${filterSql}
       LIMIT ${safeLimit} OFFSET ${safeOffset}
       FORMAT JSONEachRow
     `));
-    return { engine: ctx.dbType, editable: false, table, columns, rows, limit: safeLimit, offset: safeOffset };
+    return { engine: ctx.dbType, editable: false, table, columns, rows, limit: safeLimit, offset: safeOffset, totalRows };
   }
 
   throw new Error("Database browsing is not available for this engine");
