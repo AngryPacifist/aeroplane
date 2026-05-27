@@ -1,6 +1,6 @@
 import { Refresh03Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { api, type DatabaseColumn, type DatabaseRow, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
+import { api, type DatabaseColumn, type DatabaseRow, type DatabaseRowFilter, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
 import { DatabaseTableGrid } from "./database-table-grid";
 
@@ -28,6 +28,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const [draftRow, setDraftRow] = useState<Record<string, string>>({});
   const [insertOpen, setInsertOpen] = useState(false);
   const [insertDraft, setInsertDraft] = useState<Record<string, string>>({});
+  const [appliedFilters, setAppliedFilters] = useState<DatabaseRowFilter[]>([]);
 
   const columns = rowsResult?.columns ?? [];
   const rows = rowsResult?.rows ?? [];
@@ -55,12 +56,12 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     }
   }
 
-  async function loadRows(table = selectedTable) {
+  async function loadRows(table = selectedTable, filters = appliedFilters) {
     if (!table) return;
     setBusy("rows");
     setError("");
     try {
-      const result = await api.databaseRows(serviceId, table);
+      const result = await api.databaseRows(serviceId, table, 50, 0, filters);
       setRowsResult(result);
       setEditable(result.editable);
       setEditingIndex(null);
@@ -78,7 +79,10 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   }, [serviceId]);
 
   useEffect(() => {
-    if (selectedTable) void loadRows(selectedTable);
+    if (selectedTable) {
+      setAppliedFilters([]);
+      void loadRows(selectedTable, []);
+    }
   }, [selectedTable]);
 
   function beginEdit(index: number) {
@@ -97,7 +101,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         primaryKey: primaryKeyFor(columns, row),
         values: draftRow
       });
-      await loadRows(rowsResult.table);
+      await loadRows(rowsResult.table, appliedFilters);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not save row");
     } finally {
@@ -116,7 +120,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           primaryKey: primaryKeyFor(columns, row)
         });
       }
-      await loadRows(rowsResult.table);
+      await loadRows(rowsResult.table, appliedFilters);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not delete selected rows");
     } finally {
@@ -134,7 +138,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         table: rowsResult.table,
         values: insertDraft
       });
-      await loadRows(rowsResult.table);
+      await loadRows(rowsResult.table, appliedFilters);
     } catch (issue) {
       setInsertError(issue instanceof Error ? issue.message : "Could not insert row");
     } finally {
@@ -152,15 +156,15 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-[520px] gap-4">
-      <aside className="w-64 flex-none overflow-hidden border border-zinc-800 bg-zinc-950/45">
+    <div className="flex h-full min-h-0 gap-4">
+      <aside className="flex min-h-0 w-64 flex-none flex-col overflow-hidden border border-zinc-800 bg-zinc-950/45">
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">Tables</div>
           <button type="button" className="text-zinc-400 hover:text-zinc-100" onClick={() => void loadTables()} disabled={busy === "tables"} aria-label="Refresh tables">
             <AppIcon icon={Refresh03Icon} size={15} />
           </button>
         </div>
-        <div className="max-h-[470px] overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {tables.length === 0 ? (
             <div className="px-4 py-5 text-sm text-zinc-500">No tables found.</div>
           ) : tables.map((table) => (
@@ -184,7 +188,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">{rows.length} loaded rows</div>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className={shellButton("ghost")} onClick={() => void loadRows()} disabled={!selectedTable || busy === "rows"}>
+            <button type="button" className={shellButton("ghost")} onClick={() => void loadRows(selectedTable, appliedFilters)} disabled={!selectedTable || busy === "rows"}>
               <AppIcon icon={Refresh03Icon} size={15} />
               Refresh
             </button>
@@ -211,6 +215,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             busy={busy}
             editingIndex={editingIndex}
             draftRow={draftRow}
+            appliedFilterCount={appliedFilters.length}
             onAddRecord={() => {
               setInsertDraft(Object.fromEntries(columns.map((column) => [column.name, ""])));
               setInsertError("");
@@ -220,6 +225,10 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             onCancelEdit={() => setEditingIndex(null)}
             onDeleteRows={(rowsToDelete) => void deleteRows(rowsToDelete)}
             onDraftChange={(column, value) => setDraftRow((current) => ({ ...current, [column]: value }))}
+            onApplyFilters={(filters) => {
+              setAppliedFilters(filters);
+              void loadRows(rowsResult?.table ?? selectedTable, filters);
+            }}
             onSaveEdit={(row) => void saveEdit(row)}
           />
         )}
