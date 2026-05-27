@@ -43,7 +43,7 @@ import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from ".
 import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
-import type { ServiceFormPayload } from "./service-modal-types";
+import type { ServiceFormPayload } from "../../features/services/service-form-types";
 import { ImportTypeStep } from "./import-type-step";
 import { DatabaseSelectStep } from "./database-select-step";
 import { DatabaseConfigureStep } from "./database-configure-step";

@@ -17,7 +17,7 @@ import { api, type ProjectDetail } from "../api";
 import { AppIcon, FieldLabel, FormInput, FrameworkMark, shellButton } from "../components/ui/primitives";
 import { CreateServiceModal } from "../components/modals/create-service-modal";
 import { DeleteProjectModal } from "../components/modals/delete-project-modal";
-import type { ServiceFormPayload } from "../components/modals/service-modal-types";
+import type { ServiceFormPayload } from "../features/services/service-form-types";
 import { formatTime } from "../lib/format";
 import { usePageTitle } from "../lib/page-title";
 

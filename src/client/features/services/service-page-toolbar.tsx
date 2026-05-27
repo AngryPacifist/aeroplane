@@ -1,8 +1,8 @@
 import { ArrowDown01Icon, ArrowLeft01Icon, CloudServerIcon, GithubIcon } from "@hugeicons/core-free-icons";
 import { useEffect, useRef, useState } from "react";
 import type { Service } from "../../api";
-import { DeployPlaneIcon } from "../icons/deploy-plane-icon";
-import { AppIcon, FrameworkMark } from "../ui/primitives";
+import { DeployPlaneIcon } from "../../components/icons/deploy-plane-icon";
+import { AppIcon, FrameworkMark } from "../../components/ui/primitives";
 
 export function ServicePageToolbar({
   services,

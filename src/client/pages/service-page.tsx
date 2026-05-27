@@ -2,8 +2,8 @@ import { ArrowLeft01Icon, CloudServerIcon } from "@hugeicons/core-free-icons";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type ProjectDetail } from "../api";
-import { ServiceModal } from "../components/modals/service-modal";
-import { modalTabToRouteSegment, routeSegmentToModalTab, type ModalTab } from "../components/modals/service-modal-types";
+import { ServicePageShell } from "../features/services/service-page-shell";
+import { routeSegmentToServiceTab, serviceTabToRouteSegment, type ServiceTab } from "../features/services/service-tabs";
 import { AppIcon, shellButton } from "../components/ui/primitives";
 import { usePageTitle } from "../lib/page-title";
 
@@ -19,7 +19,7 @@ export function ServicePage({
   const navigate = useNavigate();
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState("");
-  const selectedTab = useMemo<ModalTab>(() => routeSegmentToModalTab(serviceTab), [serviceTab]);
+  const selectedTab = useMemo<ServiceTab>(() => routeSegmentToServiceTab(serviceTab), [serviceTab]);
 
   const loadProject = useCallback(async () => {
     try {
@@ -46,8 +46,8 @@ export function ServicePage({
     void navigate({ to: "/$projectSlug", params: { projectSlug } });
   }
 
-  function navigateToTab(tab: ModalTab) {
-    const segment = modalTabToRouteSegment[tab];
+  function navigateToTab(tab: ServiceTab) {
+    const segment = serviceTabToRouteSegment[tab];
     if (segment === "overview") {
       void navigate({ to: "/$projectSlug/$serviceSlug", params: { projectSlug, serviceSlug } });
       return;
@@ -56,7 +56,7 @@ export function ServicePage({
   }
 
   function navigateToService(nextServiceSlug: string) {
-    const segment = modalTabToRouteSegment[selectedTab];
+    const segment = serviceTabToRouteSegment[selectedTab];
     if (segment === "overview") {
       void navigate({ to: "/$projectSlug/$serviceSlug", params: { projectSlug, serviceSlug: nextServiceSlug } });
       return;
@@ -108,12 +108,10 @@ export function ServicePage({
   }
 
   return (
-    <ServiceModal
+    <ServicePageShell
       key={service.id}
-      projectSlug={projectSlug}
       selectedTab={selectedTab}
       serviceId={service.id}
-      presentation="page"
       onClose={navigateToProject}
       onTabChange={navigateToTab}
       onProjectRefresh={loadProject}
