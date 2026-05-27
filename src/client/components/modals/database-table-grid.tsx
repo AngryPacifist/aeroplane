@@ -1,10 +1,20 @@
-import { Add01Icon, Delete02Icon, FilterHorizontalIcon, Sorting05Icon, SortingDownIcon, SortingUpIcon, TableColumnsSplitIcon } from "@hugeicons/core-free-icons";
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Add01Icon,
+  Delete02Icon,
+  FilterHorizontalIcon,
+  Sorting05Icon,
+  SortingDownIcon,
+  SortingUpIcon,
+  TableColumnsSplitIcon
+} from "@hugeicons/core-free-icons";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { DatabaseColumn, DatabaseRow, DatabaseRowFilter } from "../../api";
 import { Checkbox } from "../ui/checkbox";
 import { AppIcon } from "../ui/primitives";
 import { DatabaseGridColumnsPopover } from "./database-grid-columns-popover";
 import { DatabaseGridFilterPopover } from "./database-grid-filter-popover";
+import { DatabaseGridPagination, type DatabaseGridPaginationState } from "./database-grid-pagination";
 import { DatabaseGridSortPopover } from "./database-grid-sort-popover";
 import { createGridFilter, filterOperators, type EditingCell, type GridFilter, type GridSort, type GridRowItem } from "./database-grid-types";
 import { applyGridSort, displayDatabaseValue } from "./database-grid-utils";
@@ -20,6 +30,7 @@ type DatabaseTableGridProps = {
   editingIndex: number | null;
   draftRow: Record<string, string>;
   appliedFilters: DatabaseRowFilter[];
+  pagination: DatabaseGridPaginationState;
   onAddRecord: () => void;
   onBeginEdit: (index: number) => void;
   onCancelEdit: () => void;
@@ -59,6 +70,7 @@ export function DatabaseTableGrid({
   editingIndex,
   draftRow,
   appliedFilters,
+  pagination,
   onAddRecord,
   onBeginEdit,
   onCancelEdit,
@@ -332,6 +344,8 @@ export function DatabaseTableGrid({
           </tbody>
         </table>
       </div>
+
+      <DatabaseGridPagination pagination={pagination} loadedRows={rows.length} busy={busy} />
     </div>
   );
 }
