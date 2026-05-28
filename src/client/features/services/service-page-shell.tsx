@@ -38,6 +38,7 @@ import { SourcePickerModal } from "../../components/modals/source-picker";
 import { DatabaseServiceSettingsPanel } from "../../components/modals/database-service-settings-panel";
 import { DatabaseBrowserPanel } from "../../components/modals/database-browser-panel";
 import { DatabaseSqlConsolePanel } from "../../components/modals/database-sql-console-panel";
+import { RedisBrowserPanel } from "../../components/modals/redis-browser-panel";
 import { ServicePageToolbar } from "./service-page-toolbar";
 import { ServiceDeploymentsPanel } from "./service-deployments-panel";
 import { ServiceDomainsPanel } from "./service-domains-panel";
@@ -488,7 +489,9 @@ export function ServicePageShell({
 
               {selectedTab === "logs" ? <RuntimeLogsPanel logs={runtimeLogs} title="Live service logs" emptyLabel="No runtime logs yet." /> : null}
 
-              {selectedTab === "data" && isDatabase ? <DatabaseBrowserPanel serviceId={serviceId} /> : null}
+              {selectedTab === "data" && isDatabase ? (
+                databaseEngine === "redis" ? <RedisBrowserPanel serviceId={serviceId} /> : <DatabaseBrowserPanel serviceId={serviceId} />
+              ) : null}
 
               {selectedTab === "sql" && hasSqlConsole ? <DatabaseSqlConsolePanel serviceId={serviceId} /> : null}
 
