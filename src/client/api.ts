@@ -287,8 +287,10 @@ export const api = {
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" }),
   updateDomain: (serviceId: string, domainId: string, body: { hostname: string }) =>
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "PATCH", body: JSON.stringify(body) }),
-  databaseTables: (serviceId: string) =>
-    request<DatabaseTablesResponse>(`/api/services/${serviceId}/database/tables`),
+  databaseTables: (serviceId: string, logicalDatabase?: number) => {
+    const suffix = logicalDatabase === undefined ? "" : `?database=${encodeURIComponent(String(logicalDatabase))}`;
+    return request<DatabaseTablesResponse>(`/api/services/${serviceId}/database/tables${suffix}`);
+  },
   databaseRows: (serviceId: string, table: string, limit = 50, offset = 0, filters: DatabaseRowFilter[] = []) => {
     const params = new URLSearchParams({
       table,
