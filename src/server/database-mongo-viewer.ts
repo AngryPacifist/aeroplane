@@ -23,6 +23,15 @@ type MongoInsertResult = {
   insertedId: string;
 };
 
+type MongoUpdateResult = {
+  matchedCount: number;
+  modifiedCount: number;
+};
+
+type MongoDeleteResult = {
+  deletedCount: number;
+};
+
 function mongoTableId(database: string, collection: string) {
   return `mongo:${Buffer.from(JSON.stringify([database, collection])).toString("base64url")}`;
 }
@@ -42,6 +51,12 @@ function mongoTargetForInsert(table: string, values: RowData) {
     database: String(values.database ?? "").trim(),
     collection: String(values.collection ?? "").trim()
   };
+}
+
+function primaryMongoId(primaryKey: RowData) {
+  const id = primaryKey._id ?? primaryKey.id;
+  if (id === null || id === undefined || id === "") throw new Error("MongoDB document _id is required");
+  return id;
 }
 
 function parseJsonOutput<T>(output: string): T {
@@ -180,7 +195,7 @@ export async function getMongoTables(ctx: DatabaseContext) {
   return {
     engine: ctx.dbType,
     supported: true,
-    editable: false,
+    editable: true,
     tables
   };
 }
@@ -194,7 +209,7 @@ export async function getMongoRows(ctx: DatabaseContext, table: string, limit: n
 
   return {
     engine: ctx.dbType,
-    editable: false,
+    editable: true,
     table,
     columns,
     rows: result.rows,
@@ -224,4 +239,77 @@ export async function insertMongoRow(ctx: DatabaseContext, table: string, values
   `);
 
   return { ok: true, table: mongoTableId(database, collection), id: result.insertedId };
+}
+
+export async function updateMongoRow(ctx: DatabaseContext, table: string, primaryKey: RowData, values: RowData) {
+  const { database, collection } = mongoTableFromId(table);
+  const documentId = primaryMongoId(primaryKey);
+  const documentSource = String(values.document ?? values.json ?? "").trim();
+  if (!documentSource) throw new Error("Document JSON is required");
+
+  const result = await runMongoJson<MongoUpdateResult>(ctx, `
+    const targetDb = db.getSiblingDB(${JSON.stringify(database)});
+    const collection = targetDb.getCollection(${JSON.stringify(collection)});
+
+    function mongoId(value) {
+      if (value && typeof value === "object" && value.$oid) return ObjectId.createFromHexString(String(value.$oid));
+      if (typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value)) return ObjectId.createFromHexString(value);
+      return value;
+    }
+
+    let document;
+    try {
+      document = EJSON.parse(${JSON.stringify(documentSource)});
+    } catch (error) {
+      throw new Error("Document must be valid JSON");
+    }
+    if (!document || typeof document !== "object" || Array.isArray(document)) {
+      throw new Error("Document must be a JSON object");
+    }
+
+    const filter = { _id: mongoId(${JSON.stringify(documentId)}) };
+    const existing = collection.findOne(filter);
+    if (!existing) throw new Error("Document not found");
+
+    delete document._id;
+    const setValues = {};
+    const unsetValues = {};
+    for (const key of Object.keys(document)) setValues[key] = document[key];
+    for (const key of Object.keys(existing)) {
+      if (key !== "_id" && !Object.prototype.hasOwnProperty.call(document, key)) unsetValues[key] = "";
+    }
+
+    const update = {};
+    if (Object.keys(setValues).length) update.$set = setValues;
+    if (Object.keys(unsetValues).length) update.$unset = unsetValues;
+
+    if (!Object.keys(update).length) {
+      print(JSON.stringify({ matchedCount: 1, modifiedCount: 0 }));
+    } else {
+      const result = collection.updateOne(filter, update);
+      print(JSON.stringify({ matchedCount: result.matchedCount, modifiedCount: result.modifiedCount }));
+    }
+  `);
+
+  return { ok: true, ...result };
+}
+
+export async function deleteMongoRow(ctx: DatabaseContext, table: string, primaryKey: RowData) {
+  const { database, collection } = mongoTableFromId(table);
+  const documentId = primaryMongoId(primaryKey);
+  const result = await runMongoJson<MongoDeleteResult>(ctx, `
+    const targetDb = db.getSiblingDB(${JSON.stringify(database)});
+    const collection = targetDb.getCollection(${JSON.stringify(collection)});
+
+    function mongoId(value) {
+      if (value && typeof value === "object" && value.$oid) return ObjectId.createFromHexString(String(value.$oid));
+      if (typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value)) return ObjectId.createFromHexString(value);
+      return value;
+    }
+
+    const result = collection.deleteOne({ _id: mongoId(${JSON.stringify(documentId)}) });
+    print(JSON.stringify({ deletedCount: result.deletedCount }));
+  `);
+
+  return { ok: true, ...result };
 }
