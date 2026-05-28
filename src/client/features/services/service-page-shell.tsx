@@ -388,19 +388,24 @@ export function ServicePageShell({
     ? service.repoFullName.slice("database:".length).toLowerCase()
     : "";
   const hasSqlConsole = isDatabase && databaseEngine !== "redis" && databaseEngine !== "mongodb" && databaseEngine !== "mongo";
-  const visibleTabs = ([
+  const appTabs: Array<[ServiceTab, unknown]> = [
     ["overview", DashboardSquare02Icon],
     ["deployments", PackageIcon],
     ["logs", LeftToRightListStarIcon],
     ["environment", VariableIcon],
     ["domains", Globe02Icon],
-    ["data", DatabaseIcon],
-    ["sql", VideoConsoleIcon],
     ["settings", GithubIcon]
-  ] as Array<[ServiceTab, unknown]>).filter(([tab]) => {
-    if (isDatabase) return tab !== "domains" && (tab !== "sql" || hasSqlConsole);
-    return tab !== "data" && tab !== "sql";
-  });
+  ];
+  const databaseTabs: Array<[ServiceTab, unknown]> = [
+    ["overview", DashboardSquare02Icon],
+    ["data", DatabaseIcon],
+    ["deployments", PackageIcon],
+    ["logs", LeftToRightListStarIcon],
+    ["environment", VariableIcon],
+    ...(hasSqlConsole ? [["sql", VideoConsoleIcon] as [ServiceTab, unknown]] : []),
+    ["settings", GithubIcon]
+  ];
+  const visibleTabs = isDatabase ? databaseTabs : appTabs;
   const deployments = overview?.deployments ?? [];
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
