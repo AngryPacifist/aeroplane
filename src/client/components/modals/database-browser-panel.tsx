@@ -6,6 +6,7 @@ import { AppIcon, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet, validRedisType } from "./database-insert-sheet";
 import { DatabaseTableGrid } from "./database-table-grid";
 import { MongoDocumentList } from "./mongo-document-list";
+import { MongoDocumentModal } from "./mongo-document-modal";
 
 function rowValue(value: unknown) {
   if (value === null || value === undefined) return "";
@@ -271,6 +272,47 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     }
   }
 
+  async function saveMongoDocument(row: DatabaseRow, document: string) {
+    if (!rowsResult) return;
+    setBusy("edit");
+    setError("");
+    try {
+      await api.updateDatabaseRow(serviceId, {
+        table: rowsResult.table,
+        primaryKey: primaryKeyFor(columns, row),
+        values: { document }
+      });
+      await loadRows(rowsResult.table, appliedFilters, pageOffset, pageSize);
+    } catch (issue) {
+      const message = issue instanceof Error ? issue.message : "Could not save document";
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteMongoDocument(row: DatabaseRow) {
+    if (!rowsResult) return;
+    setBusy("delete");
+    setError("");
+    try {
+      await api.deleteDatabaseRow(serviceId, {
+        table: rowsResult.table,
+        primaryKey: primaryKeyFor(columns, row)
+      });
+      const nextOffset = rows.length <= 1 ? Math.max(0, pageOffset - pageSize) : pageOffset;
+      adjustTableRowCount(rowsResult.table, -1);
+      await loadRows(rowsResult.table, appliedFilters, nextOffset, pageSize);
+    } catch (issue) {
+      const message = issue instanceof Error ? issue.message : "Could not delete document";
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function insertRow(event: FormEvent) {
     event.preventDefault();
     if (!rowsResult && !canAddDocument) return;
@@ -415,6 +457,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             onQueryChange={setMongoQuery}
             onFind={applyMongoQuery}
             onClearQuery={clearMongoQuery}
+            onSaveDocument={saveMongoDocument}
+            onDeleteDocument={deleteMongoDocument}
           />
         ) : columns.length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center border border-zinc-800 bg-zinc-950/45 px-5 py-8 text-center text-sm text-zinc-500">
@@ -459,7 +503,24 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           />
         )}
 
-        {insertOpen ? (
+        {insertOpen && isMongo ? (
+          <MongoDocumentModal
+            title={insertTitle()}
+            subtitle={selectedTableName || nouns.list}
+            buttonLabel={insertButtonLabel()}
+            draft={insertDraft}
+            error={insertError}
+            busy={busy}
+            onDraftChange={setInsertDraft}
+            onSubmit={insertRow}
+            onClose={() => {
+              setInsertOpen(false);
+              setInsertError("");
+            }}
+          />
+        ) : null}
+
+        {insertOpen && !isMongo ? (
           <DatabaseInsertSheet
             engine={engine}
             title={insertTitle()}
