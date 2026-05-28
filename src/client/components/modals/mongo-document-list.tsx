@@ -1,44 +1,10 @@
+import type { FormEvent } from "react";
+import { useState } from "react";
 import type { DatabaseColumn, DatabaseRow, DatabaseRowFilter } from "../../api";
 import { DatabaseGridPagination, type DatabaseGridPaginationState } from "./database-grid-pagination";
+import { MongoDocumentCard, mongoDocumentSource } from "./mongo-document-card";
+import { MongoDocumentModal } from "./mongo-document-modal";
 import { MongoQueryBar } from "./mongo-query-bar";
-
-function columnType(columns: DatabaseColumn[], name: string) {
-  return columns.find((column) => column.name === name)?.type ?? "text";
-}
-
-function documentKeys(columns: DatabaseColumn[], row: DatabaseRow) {
-  const keys = new Set<string>();
-  if ("_id" in row || columns.some((column) => column.name === "_id")) keys.add("_id");
-  columns.forEach((column) => {
-    if (column.name !== "_id") keys.add(column.name);
-  });
-  Object.keys(row).forEach((key) => {
-    if (key !== "_id") keys.add(key);
-  });
-  return Array.from(keys);
-}
-
-function formatMongoValue(value: unknown, type: string) {
-  if (value === null || value === undefined) return "null";
-  if (type === "objectId" && typeof value === "string") return `ObjectId('${value}')`;
-  if (typeof value === "string") {
-    if (type === "date") return value;
-    if (type === "array" || type === "object") return value;
-    return `"${value}"`;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
-}
-
-function valueClass(value: unknown, type: string) {
-  if (value === null || value === undefined) return "text-zinc-600";
-  if (type === "objectId") return "text-orange-400";
-  if (type === "date") return "text-sky-400";
-  if (type === "array" || type === "object") return "text-violet-300";
-  if (typeof value === "number") return "text-amber-300";
-  if (typeof value === "boolean") return "text-fuchsia-300";
-  return "text-emerald-400";
-}
 
 export function MongoDocumentList({
   columns,
@@ -49,7 +15,9 @@ export function MongoDocumentList({
   pagination,
   onQueryChange,
   onFind,
-  onClearQuery
+  onClearQuery,
+  onSaveDocument,
+  onDeleteDocument
 }: {
   columns: DatabaseColumn[];
   rows: DatabaseRow[];
@@ -60,7 +28,32 @@ export function MongoDocumentList({
   onQueryChange: (value: string) => void;
   onFind: (filters: DatabaseRowFilter[], source: string) => void;
   onClearQuery: () => void;
+  onSaveDocument: (row: DatabaseRow, document: string) => Promise<void>;
+  onDeleteDocument: (row: DatabaseRow) => Promise<void>;
 }) {
+  const [editingRow, setEditingRow] = useState<DatabaseRow | null>(null);
+  const [editDraft, setEditDraft] = useState<Record<string, string>>({});
+  const [editError, setEditError] = useState("");
+
+  function beginEdit(row: DatabaseRow) {
+    setEditingRow(row);
+    setEditDraft({ document: mongoDocumentSource(columns, row) });
+    setEditError("");
+  }
+
+  async function submitEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editingRow) return;
+    setEditError("");
+    try {
+      await onSaveDocument(editingRow, editDraft.document ?? "");
+      setEditingRow(null);
+      setEditDraft({});
+    } catch (issue) {
+      setEditError(issue instanceof Error ? issue.message : "Could not save document");
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <MongoQueryBar scopeLabel={scopeLabel} query={query} busy={busy} onQueryChange={onQueryChange} onFind={onFind} onClear={onClearQuery} />
@@ -73,26 +66,39 @@ export function MongoDocumentList({
         ) : (
           <div className="space-y-3">
             {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="border border-zinc-700 bg-zinc-950 px-4 py-4 font-mono text-sm leading-6">
-                {documentKeys(columns, row).map((key) => {
-                  const type = columnType(columns, key);
-                  const value = row[key];
-                  return (
-                    <div key={key} className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-3">
-                      <div className="min-w-0 truncate text-zinc-100">{key}:</div>
-                      <div className={`min-w-0 truncate ${valueClass(value, type)}`} title={formatMongoValue(value, type)}>
-                        {formatMongoValue(value, type)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <MongoDocumentCard
+                key={String(row._id ?? rowIndex)}
+                columns={columns}
+                row={row}
+                busy={busy}
+                onEdit={() => beginEdit(row)}
+                onDelete={() => onDeleteDocument(row)}
+              />
             ))}
           </div>
         )}
       </div>
 
       <DatabaseGridPagination pagination={pagination} loadedRows={rows.length} busy={busy} />
+
+      {editingRow ? (
+        <MongoDocumentModal
+          title="Edit document"
+          subtitle={scopeLabel}
+          buttonLabel="Save document"
+          draft={editDraft}
+          error={editError}
+          busy={busy}
+          showTargetFields={false}
+          onDraftChange={setEditDraft}
+          onSubmit={submitEdit}
+          onClose={() => {
+            setEditingRow(null);
+            setEditDraft({});
+            setEditError("");
+          }}
+        />
+      ) : null}
     </div>
   );
 }
