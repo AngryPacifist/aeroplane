@@ -362,7 +362,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-400">{nouns.list}</div>
           <button type="button" className="text-zinc-400 hover:text-zinc-100" onClick={() => void loadTables()} disabled={busy === "tables"} aria-label="Refresh tables">
-            <AppIcon icon={Refresh03Icon} size={15} />
+            <AppIcon icon={Refresh03Icon} size={15} className={busy === "tables" ? "animate-spin" : ""} />
           </button>
         </div>
         <div className="border-b border-zinc-800 p-3">
@@ -409,13 +409,13 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           </div>
           <div className="flex items-center gap-2">
             {canAddDocument ? (
-              <button type="button" className={shellButton("primary")} onClick={openInsertSheet} disabled={busy === "insert"}>
+              <button type="button" className={`${shellButton("primary")} h-9 !py-0`} onClick={openInsertSheet} disabled={busy === "insert"}>
                 <AppIcon icon={Add01Icon} size={15} />
                 {insertButtonLabel()}
               </button>
             ) : null}
-            <button type="button" className={shellButton("ghost")} onClick={() => void loadRows(selectedTable, appliedFilters, pageOffset, pageSize)} disabled={!selectedTable || busy === "rows"}>
-              <AppIcon icon={Refresh03Icon} size={15} />
+            <button type="button" className={`${shellButton("ghost")} h-9 !py-0`} onClick={() => void loadRows(selectedTable, appliedFilters, pageOffset, pageSize)} disabled={!selectedTable || busy === "rows"}>
+              <AppIcon icon={Refresh03Icon} size={15} className={busy === "rows" ? "animate-spin" : ""} />
               Refresh
             </button>
           </div>
