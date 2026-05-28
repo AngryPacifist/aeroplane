@@ -5,6 +5,7 @@ export type DatabaseGridPaginationState = {
   limit: number;
   offset: number;
   totalRows: number;
+  recordLabel?: string;
   onPageChange: (offset: number) => void;
   onPageSizeChange: (limit: number) => void;
 };
@@ -24,14 +25,15 @@ export function DatabaseGridPagination({
   const pageEnd = Math.min(pagination.offset + loadedRows, pagination.totalRows);
   const canPageBack = pagination.offset > 0;
   const canPageForward = pagination.offset + pagination.limit < pagination.totalRows;
+  const recordLabel = pagination.recordLabel ?? "row";
 
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border border-zinc-800 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-300">
       <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-        {pageStart}-{pageEnd} of {pagination.totalRows}
+        {pageStart}-{pageEnd} of {pagination.totalRows} {recordLabel}{pagination.totalRows === 1 ? "" : "s"}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Rows</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">{recordLabel}s</span>
         {[25, 50, 100, 200].map((size) => (
           <button
             key={size}
