@@ -7,7 +7,7 @@ import {
   type DatabaseContext,
   type DatabaseRowFilter,
   type DatabaseTable,
-type RowData
+  type RowData
 } from "./database-viewer-shared.js";
 
 type RedisKeyTarget = {
