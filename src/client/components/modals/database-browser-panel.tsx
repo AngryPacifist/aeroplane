@@ -5,6 +5,7 @@ import { Dropdown } from "../ui/dropdown";
 import { AppIcon, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet, validRedisType } from "./database-insert-sheet";
 import { DatabaseTableGrid } from "./database-table-grid";
+import { MongoDocumentList } from "./mongo-document-list";
 
 function rowValue(value: unknown) {
   if (value === null || value === undefined) return "";
@@ -55,6 +56,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const [pageOffset, setPageOffset] = useState(0);
   const [selectedSchema, setSelectedSchema] = useState("");
   const [engine, setEngine] = useState("");
+  const [mongoQuery, setMongoQuery] = useState("");
 
   const columns = rowsResult?.columns ?? [];
   const rows = rowsResult?.rows ?? [];
@@ -183,6 +185,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setSelectedTable(tables.find((table) => table.schema === schema)?.id ?? "");
     setRowsResult(null);
     setAppliedFilters([]);
+    setMongoQuery("");
     setPageOffset(0);
   }
 
@@ -192,6 +195,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setEngine("");
     setRowsResult(null);
     setAppliedFilters([]);
+    setMongoQuery("");
     setPageOffset(0);
     void loadTables();
   }, [serviceId]);
@@ -199,10 +203,28 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   useEffect(() => {
     if (selectedTable) {
       setAppliedFilters([]);
+      setMongoQuery("");
       setPageOffset(0);
       void loadRows(selectedTable, [], 0, pageSize);
     }
   }, [selectedTable]);
+
+  function applyMongoQuery(filters: DatabaseRowFilter[], source: string) {
+    if (!selectedTable) return;
+    setError("");
+    setMongoQuery(source);
+    setAppliedFilters(filters);
+    setPageOffset(0);
+    void loadRows(selectedTable, filters, 0, pageSize);
+  }
+
+  function clearMongoQuery() {
+    if (!selectedTable) return;
+    setMongoQuery("");
+    setAppliedFilters([]);
+    setPageOffset(0);
+    void loadRows(selectedTable, [], 0, pageSize);
+  }
 
   function beginEdit(index: number) {
     const row = rows[index];
@@ -364,9 +386,39 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           </div>
         ) : null}
 
-        {!rowsResult || columns.length === 0 ? (
+        {!rowsResult ? (
           <div className="flex min-h-0 flex-1 items-center justify-center border border-zinc-800 bg-zinc-950/45 px-5 py-8 text-center text-sm text-zinc-500">
             {busy ? "Loading data..." : `Choose ${engine === "redis" ? "a key" : engine === "mongodb" || engine === "mongo" ? "a collection" : "a table"} to inspect ${nouns.record}s.`}
+          </div>
+        ) : isMongo ? (
+          <MongoDocumentList
+            columns={columns}
+            rows={rows}
+            busy={busy}
+            scopeLabel={`${selectedSchema || selectedTableMeta?.schema || "mongo"}.${selectedTableName || "collection"}`}
+            query={mongoQuery}
+            pagination={{
+              limit: rowsResult.limit,
+              offset: rowsResult.offset,
+              totalRows: rowsResult.totalRows,
+              recordLabel: nouns.record,
+              onPageChange: (offset) => {
+                setPageOffset(offset);
+                void loadRows(rowsResult.table, appliedFilters, offset, rowsResult.limit);
+              },
+              onPageSizeChange: (limit) => {
+                setPageSize(limit);
+                setPageOffset(0);
+                void loadRows(rowsResult.table, appliedFilters, 0, limit);
+              }
+            }}
+            onQueryChange={setMongoQuery}
+            onFind={applyMongoQuery}
+            onClearQuery={clearMongoQuery}
+          />
+        ) : columns.length === 0 ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center border border-zinc-800 bg-zinc-950/45 px-5 py-8 text-center text-sm text-zinc-500">
+            {busy ? "Loading data..." : `Choose ${engine === "redis" ? "a key" : "a table"} to inspect ${nouns.record}s.`}
           </div>
         ) : (
           <DatabaseTableGrid
