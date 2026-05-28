@@ -100,6 +100,7 @@ async function applyRedisTtl(ctx: DatabaseContext, key: string, values: RowData,
 
 async function runRedis(ctx: DatabaseContext, args: string[], database = 0) {
   const password = ctx.envMap.get("REDIS_PASSWORD") || "";
+  const authIsNotConfigured = (text: string) => text.toLowerCase().includes("without any password configured");
   const command = (withPassword: boolean) => [
     "redis-cli",
     "--no-auth-warning",
@@ -116,9 +117,13 @@ async function runRedis(ctx: DatabaseContext, args: string[], database = 0) {
 
   try {
     const result = await runDockerExec(ctx.containerName, command(true));
+    if (password && authIsNotConfigured(`${result.stderr}\n${result.stdout}`)) {
+      const retry = await runDockerExec(ctx.containerName, command(false));
+      return retry.stdout.trimEnd();
+    }
     return result.stdout.trimEnd();
   } catch (error) {
-    if (password && error instanceof Error && error.message.toLowerCase().includes("auth")) {
+    if (password && error instanceof Error && (authIsNotConfigured(error.message) || error.message.toLowerCase().includes("auth"))) {
       const result = await runDockerExec(ctx.containerName, command(false));
       return result.stdout.trimEnd();
     }
