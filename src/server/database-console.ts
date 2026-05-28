@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { getMongoRows, getMongoTables, insertMongoRow } from "./database-mongo-viewer.js";
-import { deleteRedisRow, getRedisRows, getRedisTables, insertRedisRow } from "./database-redis-viewer.js";
+import { deleteRedisRow, getRedisRows, getRedisTables, insertRedisRow, updateRedisRow } from "./database-redis-viewer.js";
 import {
   activeFiltersForColumns,
   runDockerExec,
@@ -522,6 +522,7 @@ export async function updateDatabaseRow(serviceId: string, table: string, primar
   const where = Object.entries(primaryKey).filter(([key]) => key.trim());
   if (assignments.length === 0) throw new Error("No changes to save");
   if (where.length === 0) throw new Error("A primary key is required to update rows");
+  if (ctx.dbType === "redis") return updateRedisRow(ctx, table, primaryKey, values);
 
   if (ctx.dbType === "postgres") {
     await runPostgres(
