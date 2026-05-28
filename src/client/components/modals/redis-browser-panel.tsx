@@ -6,6 +6,7 @@ import { Dropdown } from "../ui/dropdown";
 import { AppIcon, FormInput, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet } from "./database-insert-sheet";
 import { RedisDeleteKeyModal } from "./redis-delete-key-modal";
+import { RedisHashTable } from "./redis-hash-table";
 import { RedisKeyActionsMenu } from "./redis-key-actions-menu";
 import { RedisTtlPopover } from "./redis-ttl-popover";
 
@@ -44,13 +45,15 @@ function redisTypeTextClass(type: string) {
 }
 
 function redisTypeBadgeClass(type: string) {
-  if (type === "string") return "border-[#4FB8B2]/35 bg-[#4FB8B2]/12 text-[#9af4ee]";
-  if (type === "set") return "border-emerald-500/35 bg-emerald-500/10 text-emerald-300";
-  if (type === "hash") return "border-amber-500/35 bg-amber-500/10 text-amber-300";
-  if (type === "list") return "border-sky-500/35 bg-sky-500/10 text-sky-300";
-  if (type === "zset") return "border-violet-500/35 bg-violet-500/10 text-violet-300";
-  return "border-zinc-700 bg-zinc-900 text-zinc-400";
+  if (type === "string") return "border-[#4FB8B2]/30 bg-[#4FB8B2]/10 text-[#9af4ee]";
+  if (type === "set") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (type === "hash") return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  if (type === "list") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  if (type === "zset") return "border-violet-500/30 bg-violet-500/10 text-violet-300";
+  return "border-zinc-700 bg-zinc-900/80 text-zinc-400";
 }
+
+const redisMetaPillClass = "inline-flex h-7 items-center border px-2.5 font-mono text-[11px] leading-none tracking-[0.04em]";
 
 function redisContentText(type: string, rows: DatabaseRow[]) {
   if (type === "string") return valueText(rows[0]?.value);
@@ -187,6 +190,24 @@ function RedisItems({
           </>
         )}
       </div>
+    );
+  }
+
+  if (type === "hash") {
+    return (
+      <RedisHashTable
+        rows={rows}
+        deleting={deleting}
+        saving={saving}
+        confirmingDeleteId={confirmingDeleteId}
+        editingItemId={editingItemId}
+        editDraft={editDraft}
+        setConfirmingDeleteId={setConfirmingDeleteId}
+        setEditingItemId={setEditingItemId}
+        setEditDraft={setEditDraft}
+        onDeleteItem={onDeleteItem}
+        onSaveItem={onSaveItem}
+      />
     );
   }
 
@@ -642,12 +663,12 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
                 <div className="min-w-0">
                   <h3 className="truncate font-hero text-xl text-zinc-100">{selectedKeyMeta.name}</h3>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <span className={`border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] ${redisTypeBadgeClass(selectedType)}`}>{selectedType || "unknown"}</span>
+                    <span className={`${redisMetaPillClass} font-semibold uppercase ${redisTypeBadgeClass(selectedType)}`}>{selectedType || "unknown"}</span>
                     {selectedType !== "string" ? (
-                      <span className="border border-zinc-700 bg-zinc-900 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-400">{itemCountLabel(selectedKeyMeta)}</span>
+                      <span className={`${redisMetaPillClass} border-zinc-700 bg-zinc-900/80 text-zinc-400`}>{itemCountLabel(selectedKeyMeta)}</span>
                     ) : null}
                     {selectedType === "string" && firstRow.bytes !== undefined ? (
-                      <span className="border border-zinc-700 bg-zinc-900 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-400">Size: {numberFormatter.format(Number(firstRow.bytes))} B</span>
+                      <span className={`${redisMetaPillClass} border-zinc-700 bg-zinc-900/80 text-zinc-400`}>Size: {numberFormatter.format(Number(firstRow.bytes))} B</span>
                     ) : null}
                     <RedisTtlPopover ttl={firstRow.ttl} busy={busy === "ttl"} onSave={saveRedisTtl} />
                   </div>
