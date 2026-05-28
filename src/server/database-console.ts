@@ -271,9 +271,9 @@ async function withTableRowCounts(tables: DatabaseTable[], countRows: (tableId: 
   }));
 }
 
-export async function getDatabaseTables(serviceId: string) {
+export async function getDatabaseTables(serviceId: string, logicalDatabase = 0) {
   const ctx = databaseContext(serviceId);
-  if (ctx.dbType === "redis") return getRedisTables(ctx);
+  if (ctx.dbType === "redis") return getRedisTables(ctx, logicalDatabase);
   if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return getMongoTables(ctx);
   if (!relationalEngines.has(ctx.dbType)) return unsupportedResponse(ctx);
 
