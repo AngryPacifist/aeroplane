@@ -304,7 +304,7 @@ export const api = {
       body: JSON.stringify({ sql })
     }),
   insertDatabaseRow: (serviceId: string, body: { table: string; values: DatabaseRow }) =>
-    request(`/api/services/${serviceId}/database/rows`, { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; table?: string; id?: string }>(`/api/services/${serviceId}/database/rows`, { method: "POST", body: JSON.stringify(body) }),
   updateDatabaseRow: (serviceId: string, body: { table: string; primaryKey: DatabaseRow; values: DatabaseRow }) =>
     request(`/api/services/${serviceId}/database/rows`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteDatabaseRow: (serviceId: string, body: { table: string; primaryKey: DatabaseRow }) =>
