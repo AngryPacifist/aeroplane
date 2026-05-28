@@ -38,9 +38,20 @@ function redisKeyForDelete(table: string, primaryKey: RowData) {
   return "";
 }
 
+function redisKeyForUpdate(table: string, primaryKey: RowData) {
+  const explicitKey = String(primaryKey.key ?? "").trim();
+  if (explicitKey) return explicitKey;
+  if (table.startsWith("redis:")) return redisKeyFromId(table);
+  return "";
+}
+
 function redisValue(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value);
+}
+
+function hasRedisField(row: RowData, field: string) {
+  return Object.prototype.hasOwnProperty.call(row, field);
 }
 
 async function applyRedisTtl(ctx: DatabaseContext, key: string, values: RowData) {
@@ -232,9 +243,111 @@ export async function insertRedisRow(ctx: DatabaseContext, table: string, values
   return { ok: true, table: redisKeyId(key) };
 }
 
+export async function updateRedisRow(ctx: DatabaseContext, table: string, primaryKey: RowData, values: RowData) {
+  const key = redisKeyForUpdate(table, primaryKey);
+  if (!key) throw new Error("Redis key is required");
+
+  if (hasRedisField(values, "ttl") || hasRedisField(values, "persist")) {
+    const ttl = Number(values.ttl ?? -1);
+    if (values.persist === true || ttl < 0) {
+      await runRedis(ctx, ["PERSIST", key]);
+      return { ok: true };
+    }
+    if (!Number.isFinite(ttl)) throw new Error("TTL must be numeric");
+    await runRedis(ctx, ["EXPIRE", key, String(Math.floor(ttl))]);
+    return { ok: true };
+  }
+
+  const type = redisValue(primaryKey.type || (await redisKeyType(ctx, key))).toLowerCase();
+
+  if (type === "string") {
+    const ttl = Number(await runRedis(ctx, ["TTL", key]));
+    await runRedis(ctx, ["SET", key, redisValue(values.value)]);
+    if (Number.isFinite(ttl) && ttl > 0) {
+      await runRedis(ctx, ["EXPIRE", key, String(Math.floor(ttl))]);
+    }
+    return { ok: true };
+  }
+
+  if (type === "hash") {
+    const oldField = redisValue(primaryKey.field);
+    const nextField = redisValue(values.field || oldField).trim();
+    if (!oldField || !nextField) throw new Error("Hash field is required");
+    if (nextField !== oldField) await runRedis(ctx, ["HDEL", key, oldField]);
+    await runRedis(ctx, ["HSET", key, nextField, redisValue(values.value)]);
+    return { ok: true };
+  }
+
+  if (type === "list") {
+    const index = Number(primaryKey.index);
+    if (!Number.isInteger(index) || index < 0) throw new Error("List index is required");
+    await runRedis(ctx, ["LSET", key, String(index), redisValue(values.value)]);
+    return { ok: true };
+  }
+
+  if (type === "set") {
+    const oldValue = redisValue(primaryKey.value);
+    const nextValue = redisValue(values.value);
+    if (oldValue !== nextValue) {
+      await runRedis(ctx, ["SREM", key, oldValue]);
+      await runRedis(ctx, ["SADD", key, nextValue]);
+    }
+    return { ok: true };
+  }
+
+  if (type === "zset") {
+    const oldMember = redisValue(primaryKey.member);
+    const nextMember = redisValue(values.member || oldMember).trim();
+    const score = Number(values.score ?? primaryKey.score ?? 0);
+    if (!oldMember || !nextMember) throw new Error("Sorted set member is required");
+    if (!Number.isFinite(score)) throw new Error("Sorted set score must be numeric");
+    if (nextMember !== oldMember) await runRedis(ctx, ["ZREM", key, oldMember]);
+    await runRedis(ctx, ["ZADD", key, String(score), nextMember]);
+    return { ok: true };
+  }
+
+  throw new Error("Editing is not available for this Redis type");
+}
+
 export async function deleteRedisRow(ctx: DatabaseContext, table: string, primaryKey: RowData) {
   const key = redisKeyForDelete(table, primaryKey);
   if (!key) throw new Error("Redis key is required");
+
+  const type = redisValue(primaryKey.type || (await redisKeyType(ctx, key))).toLowerCase();
+  const wholeKeyDelete = !hasRedisField(primaryKey, "field") && !hasRedisField(primaryKey, "index") && !hasRedisField(primaryKey, "member") && !hasRedisField(primaryKey, "value");
+
+  if (wholeKeyDelete || type === "string") {
+    await runRedis(ctx, ["DEL", key]);
+    return { ok: true };
+  }
+
+  if (type === "hash") {
+    const field = redisValue(primaryKey.field);
+    if (!field) throw new Error("Hash field is required");
+    await runRedis(ctx, ["HDEL", key, field]);
+    return { ok: true };
+  }
+
+  if (type === "list") {
+    const index = Number(primaryKey.index);
+    if (!Number.isInteger(index) || index < 0) throw new Error("List index is required");
+    const marker = `__aeroplane_deleted_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
+    await runRedis(ctx, ["LSET", key, String(index), marker]);
+    await runRedis(ctx, ["LREM", key, "1", marker]);
+    return { ok: true };
+  }
+
+  if (type === "set") {
+    await runRedis(ctx, ["SREM", key, redisValue(primaryKey.value)]);
+    return { ok: true };
+  }
+
+  if (type === "zset") {
+    const member = redisValue(primaryKey.member);
+    if (!member) throw new Error("Sorted set member is required");
+    await runRedis(ctx, ["ZREM", key, member]);
+    return { ok: true };
+  }
 
   await runRedis(ctx, ["DEL", key]);
   return { ok: true };
