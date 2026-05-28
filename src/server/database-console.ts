@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import { getMongoRows, getMongoTables, insertMongoRow } from "./database-mongo-viewer.js";
+import { deleteMongoRow, getMongoRows, getMongoTables, insertMongoRow, updateMongoRow } from "./database-mongo-viewer.js";
 import { deleteRedisRow, getRedisRows, getRedisTables, insertRedisRow, updateRedisRow } from "./database-redis-viewer.js";
 import {
   activeFiltersForColumns,
@@ -523,6 +523,7 @@ export async function updateDatabaseRow(serviceId: string, table: string, primar
   if (assignments.length === 0) throw new Error("No changes to save");
   if (where.length === 0) throw new Error("A primary key is required to update rows");
   if (ctx.dbType === "redis") return updateRedisRow(ctx, table, primaryKey, values);
+  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return updateMongoRow(ctx, table, primaryKey, values);
 
   if (ctx.dbType === "postgres") {
     await runPostgres(
@@ -549,6 +550,7 @@ export async function deleteDatabaseRow(serviceId: string, table: string, primar
 
   const where = Object.entries(primaryKey).filter(([key]) => key.trim());
   if (where.length === 0) throw new Error("A primary key is required to delete rows");
+  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return deleteMongoRow(ctx, table, primaryKey);
 
   if (ctx.dbType === "postgres") {
     await runPostgres(
