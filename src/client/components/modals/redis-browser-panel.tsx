@@ -58,6 +58,8 @@ function redisTypeBadgeClass(type: string) {
 }
 
 const redisMetaPillClass = "inline-flex h-7 items-center border px-2.5 font-mono text-[11px] leading-none tracking-[0.04em]";
+const redisToolbarDropdownClass = "w-28 [&>button]:!h-9";
+const redisToolbarTypeClass = "w-44 [&>button]:!h-9";
 
 function redisContentText(type: string, rows: DatabaseRow[]) {
   if (type === "string") return valueText(rows[0]?.value);
@@ -377,6 +379,7 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   const [insertError, setInsertError] = useState("");
   const [insertDraft, setInsertDraft] = useState<Record<string, string>>({});
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const keysRequestId = useRef(0);
   const rowsRequestId = useRef(0);
 
   const selectedKeyMeta = useMemo(() => keys.find((key) => key.id === selectedKey) ?? null, [keys, selectedKey]);
@@ -400,20 +403,23 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   }, [keys, search, typeFilter]);
 
   async function loadKeys(logicalDatabase = selectedDatabase, currentKey = selectedKey) {
+    const requestId = keysRequestId.current + 1;
+    keysRequestId.current = requestId;
     setBusy("keys");
     setError("");
     try {
       const result = await api.databaseTables(serviceId, Number(logicalDatabase));
+      if (keysRequestId.current !== requestId) return { tables: [], selected: "" };
       setKeys(result.tables);
       const nextKey = result.tables.find((key) => key.id === currentKey)?.id ?? result.tables[0]?.id ?? "";
       setSelectedKey(nextKey);
       if (result.tables.length === 0) setRowsResult(null);
       return { tables: result.tables, selected: nextKey };
     } catch (issue) {
-      setError(issue instanceof Error ? issue.message : "Could not load Redis keys");
+      if (keysRequestId.current === requestId) setError(issue instanceof Error ? issue.message : "Could not load Redis keys");
       return { tables: [], selected: "" };
     } finally {
-      setBusy("");
+      if (keysRequestId.current === requestId) setBusy("");
     }
   }
 
@@ -595,8 +601,10 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   }
 
   useEffect(() => {
+    keysRequestId.current += 1;
     rowsRequestId.current += 1;
     setSelectedDatabase("0");
+    setKeys([]);
     setSelectedKey("");
     setRowsResult(null);
     void loadKeys("0", "");
@@ -607,24 +615,27 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   }, [selectedKey]);
 
   function changeDatabase(database: string) {
+    keysRequestId.current += 1;
     rowsRequestId.current += 1;
     setSelectedDatabase(database);
+    setKeys([]);
     setSelectedKey("");
     setRowsResult(null);
     setTypeFilter("all");
+    setSearch("");
     void loadKeys(database, "");
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Dropdown value={selectedDatabase} options={redisDatabaseOptions} onChange={changeDatabase} className="w-28" />
-        <Dropdown value={typeFilter} options={typeOptions} onChange={setTypeFilter} className="w-44" />
-        <FormInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search keys" className="min-w-64 flex-1" />
-        <button type="button" className="inline-flex h-11 w-11 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-zinc-500 hover:text-white" onClick={() => void loadKeys(selectedDatabase)} disabled={busy === "keys"} aria-label="Refresh keys">
-          <AppIcon icon={Refresh03Icon} size={16} />
+        <Dropdown value={selectedDatabase} options={redisDatabaseOptions} onChange={changeDatabase} className={redisToolbarDropdownClass} />
+        <Dropdown value={typeFilter} options={typeOptions} onChange={setTypeFilter} className={redisToolbarTypeClass} />
+        <FormInput value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search keys" className="!h-9 min-w-64 flex-1" />
+        <button type="button" className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-zinc-500 hover:text-white" onClick={() => void loadKeys(selectedDatabase)} disabled={busy === "keys"} aria-label="Refresh keys">
+          <AppIcon icon={Refresh03Icon} size={16} className={busy === "keys" ? "animate-spin" : ""} />
         </button>
-        <button type="button" className={shellButton("primary")} onClick={openAddKey} disabled={busy === "insert"}>
+        <button type="button" className={`${shellButton("primary")} h-9 !py-0`} onClick={openAddKey} disabled={busy === "insert"}>
           <AppIcon icon={Add01Icon} size={15} />
           Key
         </button>
