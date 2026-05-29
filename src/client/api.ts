@@ -181,6 +181,19 @@ export type AuthStatus = {
   secretKeyConfigured: boolean;
   envPath: string;
   publicIp?: string;
+  runtimeConfig?: {
+    dataDir: string;
+    deployDryRun: boolean;
+    caddyConfigPath: string;
+    caddyReloadCmd: string;
+    port: number;
+    publicUrl: string;
+    controlPlaneHostname: string;
+    hostPortStart: number;
+    hostPortEnd: number;
+    buildkitHost: string;
+    runtimeNetworkName: string;
+  };
 };
 
 export type OnboardingPayload = {
