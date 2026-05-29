@@ -139,6 +139,85 @@ export type DatabaseQueryResult = {
   elapsedMs: number;
 };
 
+export type R2SettingsStatus = {
+  connected: boolean;
+  accountId: string;
+  bucket: string;
+  endpoint: string;
+  accessKeyIdSuffix: string;
+  connectedAt: null | string;
+  updatedAt: null | string;
+};
+
+export type DatabaseBackup = {
+  id: string;
+  serviceId: string;
+  engine: string;
+  status: "running" | "succeeded" | "failed";
+  storage: "disk" | "disk+r2";
+  format: string;
+  localPath: null | string;
+  fileName: null | string;
+  r2Key: null | string;
+  sizeBytes: null | number;
+  checksum: null | string;
+  error: null | string;
+  createdAt: string;
+  startedAt: null | string;
+  finishedAt: null | string;
+};
+
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
+export type AuthStatus = {
+  setupComplete: boolean;
+  authenticated: boolean;
+  user: AuthUser | null;
+  secretKeyConfigured: boolean;
+  envPath: string;
+  publicIp?: string;
+};
+
+export type OnboardingPayload = {
+  owner: {
+    name: string;
+    email: string;
+    password: string;
+  };
+  env: {
+    secretKey?: string;
+    dataDir: string;
+    deployDryRun: boolean;
+    caddyConfigPath: string;
+    caddyReloadCmd: string;
+    port: number;
+    publicUrl: string;
+    hostPortStart: number;
+    hostPortEnd: number;
+    buildkitHost: string;
+    runtimeNetworkName: string;
+    githubAccessToken?: string;
+    githubAppId?: string;
+    githubAppClientId?: string;
+    githubAppSlug?: string;
+    githubAppPrivateKey?: string;
+    githubWebhookSecret?: string;
+  };
+  rootDomain?: string;
+  r2?: {
+    accountId?: string;
+    bucket?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    createBucket?: boolean;
+  };
+};
+
 export type EnvVar = {
   id: string;
   key: string;
@@ -236,6 +315,7 @@ export type GitHubStatus = {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       ...(options?.headers ?? {})
@@ -251,6 +331,20 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  login: (body: { email: string; password: string }) =>
+    request<{ ok: boolean; user: AuthUser }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  setup: (body: OnboardingPayload) =>
+    request<{ ok: boolean; user: AuthUser; envPath: string; restartRequired: boolean }>("/api/auth/setup", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  restartOnboarding: (body: Omit<OnboardingPayload, "owner">) =>
+    request<{ ok: boolean; envPath: string; restartRequired: boolean }>("/api/system/onboarding/restart", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
   system: () => request<{ tools: ToolCheck[] }>("/api/system"),
   githubStatus: () => request<GitHubStatus>("/api/github/status"),
   githubRepos: (query = "") => request<{ repos: GitHubRepo[] }>(`/api/github/repos?q=${encodeURIComponent(query)}`),
@@ -340,9 +434,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body)
     }),
+  r2Settings: () => request<{ r2: R2SettingsStatus }>("/api/system/r2"),
+  updateR2Settings: (body: {
+    accountId: string;
+    bucket: string;
+    accessKeyId: string;
+    secretAccessKey?: string;
+    createBucket?: boolean;
+  }) =>
+    request<{ ok: boolean; r2: R2SettingsStatus }>("/api/system/r2", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  disconnectR2: () => request<{ ok: boolean; r2: R2SettingsStatus }>("/api/system/r2", { method: "DELETE" }),
   systemUpdates: () => request<SystemUpdateInfo>("/api/system/updates"),
   applySystemUpdate: () =>
     request<{ ok: boolean; updateRun: SystemUpdateRun }>("/api/system/updates/apply", {
       method: "POST"
-    })
+    }),
+  databaseBackups: (serviceId: string) =>
+    request<{ backups: DatabaseBackup[]; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
+  createDatabaseBackup: (serviceId: string, storage: "disk" | "disk+r2") =>
+    request<{ backup: DatabaseBackup }>(`/api/services/${serviceId}/database/backups`, {
+      method: "POST",
+      body: JSON.stringify({ storage })
+    }),
+  deleteDatabaseBackup: (serviceId: string, backupId: string) =>
+    request<{ ok: boolean }>(`/api/services/${serviceId}/database/backups/${backupId}`, { method: "DELETE" }),
+  databaseBackupDownloadUrl: (serviceId: string, backupId: string) =>
+    `/api/services/${serviceId}/database/backups/${backupId}/download`
 };
