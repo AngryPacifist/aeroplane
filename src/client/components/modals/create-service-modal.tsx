@@ -54,6 +54,28 @@ type ParsedEnvEntry = {
   value: string;
 };
 
+type GitSourceMode = "github" | "url";
+
+function isGitUrl(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("https://") || trimmed.startsWith("git@");
+}
+
+function nameFromGitUrl(value: string) {
+  const trimmed = value.trim().replace(/\/$/, "").replace(/\.git$/, "");
+  if (!trimmed) return "";
+
+  if (trimmed.startsWith("git@")) {
+    return trimmed.split(":").at(-1)?.split("/").at(-1) ?? "";
+  }
+
+  try {
+    return new URL(trimmed).pathname.split("/").filter(Boolean).at(-1) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function parseEnvText(input: string): ParsedEnvEntry[] {
   const byKey = new Map<string, string>();
 
@@ -86,11 +108,13 @@ export function CreateServiceModal({
 }) {
   const [step, setStep] = useState<"type" | "repo" | "directory" | "configure" | "database-select" | "database-configure">("type");
   const [serviceType, setServiceType] = useState<"git" | "database" | null>(null);
+  const [gitSourceMode, setGitSourceMode] = useState<GitSourceMode>("github");
   const [selectedDbType, setSelectedDbType] = useState<DatabaseType>("postgres");
 
   const [form, setForm] = useState<ServiceFormPayload>({
     name: "",
     repoFullName: "",
+    repoUrl: "",
     branch: "main",
     rootDir: undefined,
     internalPort: 8080,
@@ -142,9 +166,11 @@ export function CreateServiceModal({
     if (!open) {
       setStep("type");
       setServiceType(null);
+      setGitSourceMode("github");
       setForm({
         name: "",
         repoFullName: "",
+        repoUrl: "",
         branch: "main",
         rootDir: undefined,
         internalPort: 8080,
@@ -246,15 +272,16 @@ export function CreateServiceModal({
   }, [ownerFilter, owners]);
 
   useEffect(() => {
-    if (!form.repoFullName) return;
+    const repoFullName = form.repoFullName;
+    if (!repoFullName) return;
     let cancelled = false;
 
     void (async () => {
       try {
-        const cachedBranches = githubBranchesCache.get(form.repoFullName);
-        const nextBranches = cachedBranches ?? (await api.githubBranches(form.repoFullName)).branches;
+        const cachedBranches = githubBranchesCache.get(repoFullName);
+        const nextBranches = cachedBranches ?? (await api.githubBranches(repoFullName)).branches;
         if (!cachedBranches) {
-          githubBranchesCache.set(form.repoFullName, nextBranches);
+          githubBranchesCache.set(repoFullName, nextBranches);
         }
         if (cancelled) return;
         startTransition(() => {
@@ -284,6 +311,7 @@ export function CreateServiceModal({
       ...current,
       name: current.name || repo.name,
       repoFullName: repo.fullName,
+      repoUrl: undefined,
       branch: repo.defaultBranch,
       rootDir: undefined
     }));
@@ -352,8 +380,11 @@ export function CreateServiceModal({
     setBusy(true);
     setError("");
     try {
+      const isUrlSource = serviceType === "git" && gitSourceMode === "url";
       await onCreate({
         ...form,
+        repoFullName: isUrlSource ? null : form.repoFullName,
+        repoUrl: isUrlSource ? form.repoUrl?.trim() : undefined,
         rootDir: form.rootDir || undefined,
         installCommand: form.installCommand || undefined,
         buildCommand: form.buildCommand || undefined,
@@ -401,11 +432,18 @@ export function CreateServiceModal({
   }
 
   const currentDirectory = form.rootDir || "";
+  const isUrlSource = serviceType === "git" && gitSourceMode === "url";
+  const gitUrlValid = isGitUrl(form.repoUrl ?? "");
 
   const stepItems = serviceType === "database"
     ? ([
         { key: "database-select", label: "Database" },
         { key: "database-configure", label: "Configure" }
+      ] as const)
+    : isUrlSource
+    ? ([
+        { key: "repo", label: "Git URL" },
+        { key: "configure", label: "Configure" }
       ] as const)
     : ([
         { key: "repo", label: "Repository" },
@@ -415,6 +453,8 @@ export function CreateServiceModal({
 
   const stepIndex = serviceType === "database"
     ? step === "database-select" ? 0 : 1
+    : isUrlSource
+    ? step === "repo" ? 0 : 1
     : step === "repo" ? 0 : step === "directory" ? 1 : 2;
 
   function handleEnvPaste(text: string) {
@@ -479,6 +519,10 @@ export function CreateServiceModal({
       ? "Choose service type"
       : serviceType === "database"
       ? step === "database-select"
+        ? "Step 1 of 2"
+        : "Step 2 of 2"
+      : isUrlSource
+      ? step === "repo"
         ? "Step 1 of 2"
         : "Step 2 of 2"
       : step === "repo"
@@ -546,7 +590,91 @@ export function CreateServiceModal({
         <div className="flex min-h-full flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             <div className="space-y-4">
-              {connected === false ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className={`${gitSourceMode === "github" ? chipClass(true) : chipClass(false)} w-full justify-start`}
+                  onClick={() => {
+                    setGitSourceMode("github");
+                    setForm((current) => ({ ...current, repoUrl: undefined }));
+                  }}
+                >
+                  <AppIcon icon={GithubIcon} size={15} />
+                  GitHub repository
+                </button>
+                <button
+                  type="button"
+                  className={`${gitSourceMode === "url" ? chipClass(true) : chipClass(false)} w-full justify-start`}
+                  onClick={() => {
+                    setGitSourceMode("url");
+                    setForm((current) => ({ ...current, repoFullName: "", rootDir: undefined }));
+                    setDirectoryNodes({});
+                    setExpandedDirectories(new Set());
+                    setDirectoryError("");
+                  }}
+                >
+                  <AppIcon icon={WorkflowSquare07Icon} size={15} />
+                  Git URL
+                </button>
+              </div>
+
+              {gitSourceMode === "url" ? (
+                <div className="space-y-4 border border-zinc-700 bg-zinc-900/85 p-4">
+                  <div>
+                    <FieldLabel>Git URL</FieldLabel>
+                    <FormInput
+                      value={form.repoUrl ?? ""}
+                      onChange={(event) => {
+                        const repoUrl = event.target.value;
+                        const inferredName = nameFromGitUrl(repoUrl);
+                        setForm((current) => ({
+                          ...current,
+                          repoUrl,
+                          name: current.name || inferredName
+                        }));
+                      }}
+                      placeholder="https://github.com/owner/repo.git"
+                      autoComplete="off"
+                      disabled={busy}
+                    />
+                    {form.repoUrl?.trim() && !gitUrlValid ? (
+                      <p className="mt-2 text-xs text-rose-300">Use an HTTPS Git URL or SSH URL like git@github.com:owner/repo.git.</p>
+                    ) : (
+                      <p className="mt-2 text-xs text-zinc-500">Use this for public repos, SSH repos, or providers outside the GitHub App flow.</p>
+                    )}
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel>Service name</FieldLabel>
+                      <FormInput
+                        value={form.name}
+                        onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="api"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Branch</FieldLabel>
+                      <FormInput
+                        value={form.branch}
+                        onChange={(event) => setForm((current) => ({ ...current, branch: event.target.value }))}
+                        placeholder="main"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className={shellButton("primary")}
+                      disabled={!gitUrlValid || !form.name.trim() || !form.branch.trim()}
+                      onClick={() => setStep("configure")}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              ) : connected === false ? (
                 <div className="space-y-3 border border-zinc-700 bg-zinc-900/85 p-4">
                   <div className="text-sm text-zinc-300">
                     {githubStatus?.installUrl ? (
@@ -561,12 +689,12 @@ export function CreateServiceModal({
                   </div>
                   <div className="flex gap-3">
                     <FormInput
-                      value={form.repoFullName}
+                      value={form.repoFullName ?? ""}
                       onChange={(event) => setForm((current) => ({ ...current, repoFullName: event.target.value, name: event.target.value.split("/").at(-1) || current.name }))}
                       placeholder="owner/repo"
                       disabled={busy}
                     />
-                    <button type="button" className={shellButton("primary")} onClick={() => setStep("directory")} disabled={!form.repoFullName.trim()}>
+                    <button type="button" className={shellButton("primary")} onClick={() => setStep("directory")} disabled={!form.repoFullName?.trim()}>
                       Continue
                     </button>
                   </div>
@@ -685,7 +813,7 @@ export function CreateServiceModal({
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1 pt-5">
             <DirectoryTree
-              repoLabel={selectedRepo?.name ?? form.repoFullName}
+              repoLabel={selectedRepo?.name ?? form.repoFullName ?? ""}
               selectedPath={currentDirectory}
               directoriesByPath={directoryNodes}
               expandedPaths={expandedDirectories}
@@ -713,9 +841,17 @@ export function CreateServiceModal({
           <div className="space-y-5">
           <div>
             <FieldLabel>Root directory</FieldLabel>
-            <div className="flex h-11 items-center border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100">
-              {currentDirectory ? `./${currentDirectory}` : "./"}
-            </div>
+            {isUrlSource ? (
+              <FormInput
+                value={form.rootDir ?? ""}
+                onChange={(event) => setForm((current) => ({ ...current, rootDir: event.target.value || undefined }))}
+                placeholder="."
+              />
+            ) : (
+              <div className="flex h-11 items-center border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100">
+                {currentDirectory ? `./${currentDirectory}` : "./"}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -862,7 +998,7 @@ export function CreateServiceModal({
           </div>
           </div>
           <div className="mt-5 flex items-center justify-between gap-3 border-t border-zinc-800 pt-4">
-            <button type="button" className={shellButton("ghost")} onClick={() => setStep("directory")}>
+            <button type="button" className={shellButton("ghost")} onClick={() => setStep(isUrlSource ? "repo" : "directory")}>
               <AppIcon icon={ArrowLeft01Icon} size={16} />
               Back
             </button>
