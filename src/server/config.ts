@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-function applyEnvFile(filePath: string) {
+function applyEnvFile(filePath: string, { override = false } = {}) {
   if (!existsSync(filePath)) return;
 
   const source = readFileSync(filePath, "utf8");
@@ -16,7 +16,7 @@ function applyEnvFile(filePath: string) {
     if (separatorIndex <= 0) continue;
 
     const key = rawLine.slice(0, separatorIndex).trim();
-    if (!key || process.env[key] !== undefined) continue;
+    if (!key || (!override && process.env[key] !== undefined)) continue;
 
     let value = rawLine.slice(separatorIndex + 1).trim();
     if (value.startsWith('"') || value.startsWith("'")) {
@@ -38,7 +38,7 @@ function applyEnvFile(filePath: string) {
 }
 
 applyEnvFile(resolve(process.cwd(), ".env"));
-applyEnvFile(resolve(process.cwd(), ".env.local"));
+applyEnvFile(resolve(process.cwd(), ".env.local"), { override: true });
 
 export const config = {
   port: Number(process.env.PORT ?? 4310),
@@ -57,6 +57,7 @@ export const config = {
   hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? 4100),
   hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? 4999),
   runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? "aeroplane-runtime",
+  secretKey: process.env.AEROPLANE_SECRET_KEY ?? "",
   caddyConfigPath: resolve(process.env.CADDY_CONFIG_PATH ?? "data/Caddyfile"),
   caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? "caddy reload --config ./data/Caddyfile",
   updateRepoUrl: process.env.AEROPLANE_UPDATE_REPO_URL ?? "https://github.com/akinloluwami/aeroplane.git",
