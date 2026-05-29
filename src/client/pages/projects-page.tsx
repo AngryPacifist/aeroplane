@@ -1,13 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
 import { AddSquareIcon, FolderCodeIcon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
-import { api, type GitHubStatus, type ProjectCard, type ToolCheck } from "../api";
+import { api, type GitHubStatus, type ProjectCard, type R2SettingsStatus, type ToolCheck } from "../api";
 import { BrandMark } from "../components/ui/brand-mark";
 import { AppIcon } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
 import { ServiceCluster } from "../features/projects/service-cluster";
 import { SystemHealthPill } from "../features/projects/system-health-pill";
+import { SetupTodoList } from "../features/projects/setup-todo-list";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import { SystemSettingsModal } from "../components/modals/system-settings-modal";
 import type { SystemSettingsTab } from "../components/modals/system-settings-types";
@@ -21,6 +22,9 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
   const [projects, setProjects] = useState<ProjectCard[]>([]);
   const [tools, setTools] = useState<ToolCheck[]>([]);
   const [githubStatus, setGitHubStatus] = useState<null | GitHubStatus>(null);
+  const [domainSettings, setDomainSettings] = useState<null | Awaited<ReturnType<typeof api.systemSettings>>>(null);
+  const [r2Status, setR2Status] = useState<null | R2SettingsStatus>(null);
+  const [setupLoading, setSetupLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [railwayImportOpen, setRailwayImportOpen] = useState(false);
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
@@ -29,14 +33,31 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
   const activeSettingsTab = settingsTab ?? "root-domain";
 
   const loadProjects = useCallback(async () => {
-    const [projectData, systemData, githubData] = await Promise.all([api.projects(), api.system(), api.githubStatus().catch(() => null)]);
-    startTransition(() => {
-      setProjects(projectData.projects);
-      setTools(systemData.tools);
-      setGitHubStatus(githubData);
-      setGitHubInstallOpen(Boolean(githubData && githubData.mode === "app" && !githubData.installed && githubData.installUrl));
-      setError("");
-    });
+    setSetupLoading(true);
+    try {
+      const [projectData, systemData, githubData, domainData, r2Data] = await Promise.all([
+        api.projects(),
+        api.system(),
+        api.githubStatus().catch(() => null),
+        api.systemSettings().catch(() => null),
+        api.r2Settings().then((result) => result.r2).catch(() => null)
+      ]);
+      startTransition(() => {
+        setProjects(projectData.projects);
+        setTools(systemData.tools);
+        setGitHubStatus(githubData);
+        setDomainSettings(domainData);
+        setR2Status(r2Data);
+        setGitHubInstallOpen(Boolean(githubData && githubData.mode === "app" && !githubData.installed && githubData.installUrl));
+        setError("");
+        setSetupLoading(false);
+      });
+    } catch (issue) {
+      startTransition(() => {
+        setError(issue instanceof Error ? issue.message : "Could not load projects");
+        setSetupLoading(false);
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -125,6 +146,16 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
             </div>
           ) : null}
 
+          <SetupTodoList
+            loading={setupLoading}
+            domainSettings={domainSettings}
+            githubStatus={githubStatus}
+            r2Status={r2Status}
+            tools={tools}
+            onOpenSettings={openSystemSettings}
+            onOpenGitHubInstall={() => setGitHubInstallOpen(true)}
+          />
+
           {projects.length === 0 ? (
             <section className="border border-zinc-800 bg-zinc-950/60 px-6 py-10 sm:px-8">
               <div className="max-w-2xl">
@@ -187,7 +218,15 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
       <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
       <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
-      <SystemSettingsModal activeTab={activeSettingsTab} onTabChange={changeSystemSettingsTab} open={settingsOpen} onClose={closeSystemSettings} />
+      <SystemSettingsModal
+        activeTab={activeSettingsTab}
+        onTabChange={changeSystemSettingsTab}
+        open={settingsOpen}
+        onClose={() => {
+          closeSystemSettings();
+          void loadProjects();
+        }}
+      />
     </>
   );
 }
