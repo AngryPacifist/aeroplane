@@ -20,7 +20,7 @@ import { RootDomainStep } from "../features/onboarding/root-domain-step";
 import { RuntimeStep } from "../features/onboarding/runtime-step";
 import { defaultOnboardingForm, type OnboardingForm } from "../features/onboarding/onboarding-types";
 import { usePageTitle } from "../lib/page-title";
-import { isWildcardRootDomain, normalizeRootDomain } from "../lib/root-domain";
+import { isWildcardRootDomain, normalizeRootDomain, wildcardRootDomain } from "../lib/root-domain";
 
 type OnboardingStepKey = "owner" | "runtime" | "github" | "root-domain" | "backups";
 
@@ -93,8 +93,8 @@ export function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(defaultOnboardingForm);
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [completed, setCompleted] = useState(false);
   const [error, setError] = useState("");
   usePageTitle("Onboarding");
 
@@ -114,6 +114,39 @@ export function OnboardingPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!authStatus || hydrated) return;
+    setHydrated(true);
+
+    const runtime = authStatus.runtimeConfig;
+    if (runtime) {
+      setForm((current) => ({
+        ...current,
+        dataDir: runtime.dataDir,
+        deployDryRun: runtime.deployDryRun,
+        caddyConfigPath: runtime.caddyConfigPath,
+        caddyReloadCmd: runtime.caddyReloadCmd,
+        port: String(runtime.port),
+        publicUrl: runtime.publicUrl,
+        controlPlaneHostname: runtime.controlPlaneHostname,
+        hostPortStart: String(runtime.hostPortStart),
+        hostPortEnd: String(runtime.hostPortEnd),
+        buildkitHost: runtime.buildkitHost,
+        runtimeNetworkName: runtime.runtimeNetworkName
+      }));
+    }
+
+    if (authStatus.setupComplete && authStatus.authenticated) {
+      void api.systemSettings().then((result) => {
+        setForm((current) => ({
+          ...current,
+          controlPlaneHostname: result.settings.controlPlaneHostname || current.controlPlaneHostname,
+          rootDomain: wildcardRootDomain(result.settings.rootDomain)
+        }));
+      }).catch(() => undefined);
+    }
+  }, [authStatus, hydrated]);
 
   useEffect(() => {
     if (step >= activeSteps.length) setStep(0);
@@ -164,28 +197,11 @@ export function OnboardingPage() {
       } else {
         await api.setup(buildPayload(form));
       }
-      setCompleted(true);
-      window.setTimeout(() => window.location.replace("/"), 150);
+      window.location.replace("/onboarding/success");
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not finish setup");
       setSubmitting(false);
     }
-  }
-
-  if (completed) {
-    return (
-      <main className="relative isolate grid min-h-dvh place-items-center overflow-hidden bg-zinc-950 px-5 py-8 text-zinc-100">
-        <div aria-hidden className="hero-noise pointer-events-none absolute inset-0" />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] [background-size:72px_72px]"
-        />
-        <div className="relative z-10 border border-[#4FB8B2]/40 bg-[#4FB8B2]/10 px-5 py-4 text-center">
-          <div className="font-hero text-lg text-zinc-100">{restartMode ? "Onboarding updated" : "Aeroplane is ready"}</div>
-          <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[#9af4ee]">Opening dashboard</div>
-        </div>
-      </main>
-    );
   }
 
   return (
