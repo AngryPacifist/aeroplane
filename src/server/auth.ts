@@ -32,9 +32,13 @@ function cookieOptions() {
     path: "/",
     httpOnly: true,
     sameSite: "Lax" as const,
-    secure: config.publicUrl.startsWith("https://"),
+    secure: currentPublicUrl().startsWith("https://"),
     maxAge: sessionMaxAgeSeconds
   };
+}
+
+function currentPublicUrl() {
+  return process.env.PUBLIC_URL ?? config.publicUrl;
 }
 
 function passwordHash(password: string) {
@@ -169,7 +173,7 @@ function trustedOrigin(c: Context) {
   }
 
   try {
-    return origin === new URL(config.publicUrl).origin;
+    return origin === new URL(currentPublicUrl()).origin;
   } catch {
     return false;
   }
