@@ -1,28 +1,78 @@
 # Aeroplane
 
-Aeroplane is a self-hostable deployment control plane. It connects a GitHub repo, builds source with Railpack, runs the app with Docker, streams deployment logs, injects environment variables, and writes Caddy routes for custom domains.
+Aeroplane is a self-hosted deployment control plane for running apps and databases on your own VPS. It connects to GitHub, builds projects with Railpack and BuildKit, runs services with Docker, manages environment variables, writes Caddy routes for domains, and gives you a dashboard for deployments, logs, variables, database data, backups, and system updates.
 
-## What Works Now
+## Overview
 
-- Project creation from a Git repository URL.
-- Manual deploys.
-- GitHub App-based repo connect and push-triggered deploys.
-- Railpack build orchestration.
-- Docker runtime orchestration.
-- Live deployment log streaming.
-- Environment variable CRUD with redacted logs.
-- Domain CRUD with generated Caddy config.
-- Host prerequisite checks in the dashboard.
+Aeroplane is designed for small teams and personal infrastructure where you want Railway-like workflows without giving up control of the server.
 
-## Stack
+It currently supports:
 
-- TypeScript
-- React + Vite
-- Hono on Node.js
-- SQLite + Drizzle
-- Railpack + BuildKit
-- Docker Engine
-- Caddy
+- GitHub-connected projects and services.
+- Manual and push-triggered deployments.
+- Railpack-based builds through BuildKit.
+- Docker service orchestration with zero-downtime container swaps.
+- Generated service domains from a root domain.
+- Custom domains through Caddy.
+- Environment variable management.
+- PostgreSQL, Redis, and MongoDB services.
+- Database browsing, editing, SQL console support where applicable, and backups.
+
+## Installation
+
+On a fresh Ubuntu/Debian VPS, run:
+
+```bash
+curl -fsSL https://get.aeroplane.run | sh
+```
+
+The installer creates `/opt/aeroplane`, writes a production `.env`, creates a Docker Compose file, and starts:
+
+- `aeroplane` from `ghcr.io/akinloluwami/aeroplane:latest`
+- `deploy-buildkit` on `127.0.0.1:1234`
+- `deploy-caddy` on host ports `80` and `443`
+
+After installation, open the printed URL and complete onboarding in the browser.
+
+### Install Options
+
+You can override installer defaults by passing environment variables to `sh`:
+
+```bash
+curl -fsSL https://get.aeroplane.run | \
+  AEROPLANE_PUBLIC_URL=https://pilot.example.com \
+  AEROPLANE_IMAGE=ghcr.io/akinloluwami/aeroplane:latest \
+  AEROPLANE_PORT=4310 \
+  sh
+```
+
+Common options:
+
+- `AEROPLANE_HOME`: install directory, default `/opt/aeroplane`
+- `AEROPLANE_IMAGE`: Docker image to run, default `ghcr.io/akinloluwami/aeroplane:latest`
+- `AEROPLANE_PUBLIC_URL`: public URL written to `PUBLIC_URL`
+- `AEROPLANE_PORT`: control-plane port, default `4310`
+- `AEROPLANE_HOST_PORT_START`: first deployable host port, default `4100`
+- `AEROPLANE_HOST_PORT_END`: last deployable host port, default `4999`
+
+### Managing The Install
+
+On the VPS:
+
+```bash
+cd /opt/aeroplane
+sudo docker compose logs -f aeroplane
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+If UFW is enabled, allow the public ports:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 4310/tcp
+```
 
 ## Local Development
 
@@ -34,103 +84,72 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-For UI-only testing, set `DEPLOY_DRY_RUN=true` in `.env`. Deployments will queue, log, and complete without cloning, building, or starting containers.
-
-## Host Bootstrap
-
-On the target Linux host:
+For UI-only work, set this in `.env`:
 
 ```bash
-./scripts/bootstrap-host.sh
+DEPLOY_DRY_RUN=true
 ```
 
-On macOS with Docker Desktop and Homebrew:
-
-```bash
-./scripts/bootstrap-mac.sh
-```
-
-Then set these in `.env`:
-
-```bash
-BUILDKIT_HOST=tcp://127.0.0.1:1234
-DEPLOY_DRY_RUN=false
-```
-
-`BUILDKIT_HOST` defaults to `tcp://127.0.0.1:1234`, which matches the bundled bootstrap scripts.
-
-If you run Caddy with the included Compose service, use:
-
-```bash
-CADDY_CONFIG_PATH=./data/Caddyfile
-CADDY_RELOAD_CMD=true
-```
-
-Caddy runs with `--watch`, so file changes are picked up automatically.
-
-## Optional Caddy + BuildKit Services
+For real local deployments, start the host services:
 
 ```bash
 docker compose up -d
 ```
 
-This starts:
-
-- `deploy-buildkit` on `127.0.0.1:1234`
-- `deploy-caddy` in host network mode for ports `80` and `443`
-
-Host networking is intended for Linux VPS deployments.
-
-For local Mac testing, run Caddy directly:
+Then use:
 
 ```bash
-caddy run --config ./data/Caddyfile
+BUILDKIT_HOST=tcp://127.0.0.1:1234
+CADDY_CONFIG_PATH=./data/Caddyfile
+CADDY_RELOAD_CMD=true
+DEPLOY_DRY_RUN=false
 ```
 
-Use a real domain only if it resolves back to your Mac and inbound ports are reachable. For ordinary local testing, use a temporary Caddyfile with an HTTP localhost port.
+## GitHub App
 
-For `.localhost` development domains, add names like `hono.localhost` in the dashboard. Aeroplane writes these as HTTP-only Caddy routes, so `http://hono.localhost` proxies to the mapped app container without needing certificates or `/etc/hosts` changes.
-
-## GitHub App Setup
-
-Create a GitHub App and give it these repository permissions:
+Aeroplane works best with a GitHub App. Create one with these repository permissions:
 
 - `Contents: Read`
 - `Metadata: Read`
 
-Subscribe the app to the `Push` webhook event.
-
-Then set these in `.env`:
-
-```bash
-GITHUB_APP_ID=1234567
-GITHUB_APP_CLIENT_ID=Iv23li...
-GITHUB_APP_SLUG=your-app-slug
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
-GITHUB_WEBHOOK_SECRET=super-secret-value
-```
-
-Point the app's webhook URL at:
+Subscribe it to the `Push` webhook event and point the webhook URL at:
 
 ```txt
 https://YOUR_PUBLIC_HOST/api/github/app/webhook
 ```
 
-After that, install the app on the repos you want to deploy. The new-service modal will browse installed repositories, branches, and directories automatically. Pushes to the configured branch will enqueue deployments for every matching service.
+The app details can be entered during onboarding or later in system settings.
 
-For a temporary fallback, the server still accepts `GITHUB_ACCESS_TOKEN`, but the preferred path is the GitHub App flow.
+## Domains
 
-## Custom Domains
+Set a root domain in onboarding or system settings to generate service hostnames automatically.
 
-Add a domain in the dashboard, then point DNS at your server:
+Example:
+
+```txt
+Root domain: pilot.example.com
+Service URL: api.pilot.example.com
+```
+
+For custom domains, point DNS at the VPS:
 
 ```txt
 A     app.example.com     YOUR_SERVER_IPV4
 AAAA  app.example.com     YOUR_SERVER_IPV6
 ```
 
-Caddy handles HTTP routing and certificates when the domain resolves to the host.
+Caddy handles routing and certificates once DNS resolves to the server.
 
-## Notes
+## Stack
 
-This MVP assumes trusted users. Running arbitrary public user code requires stronger sandboxing, quotas, auth, network policy, and secret isolation.
+- TypeScript
+- React + Vite
+- Hono on Node.js
+- SQLite + Drizzle
+- Railpack + BuildKit
+- Docker Engine
+- Caddy
+
+## Security Note
+
+Aeroplane runs deployment workloads on your server through Docker. Only install it on infrastructure you control, and only grant access to trusted users.
