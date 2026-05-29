@@ -88,6 +88,7 @@ export function ServicePageShell({
   const [settings, setSettings] = useState({
     name: "",
     repoFullName: "",
+    repoUrl: "",
     branch: "",
     rootDir: "",
     installCommand: "",
@@ -127,6 +128,7 @@ export function ServicePageShell({
         setSettings({
           name: result.service.name,
           repoFullName: result.service.repoFullName ?? "",
+          repoUrl: result.service.repoUrl,
           branch: result.service.branch,
           rootDir: result.service.rootDir ?? "",
           installCommand: result.service.installCommand ?? "",
@@ -350,6 +352,7 @@ export function ServicePageShell({
       await api.updateService(serviceId, {
         name: settings.name,
         repoFullName: isDatabase ? settings.repoFullName : (settings.repoFullName.trim() ? settings.repoFullName : null),
+        repoUrl: isDatabase ? undefined : (settings.repoFullName.trim() ? undefined : settings.repoUrl.trim() || undefined),
         branch: settings.branch,
         rootDir: isDatabase ? undefined : (settings.rootDir || undefined),
         installCommand: isDatabase ? undefined : (settings.installCommand || undefined),
@@ -387,6 +390,7 @@ export function ServicePageShell({
 
   const service = overview?.service;
   const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
+  const isGitUrlSource = Boolean(service && !isDatabase && !settings.repoFullName && settings.repoUrl);
   const databaseEngine = service?.repoFullName?.startsWith("database:")
     ? service.repoFullName.slice("database:".length).toLowerCase()
     : "";
@@ -538,7 +542,7 @@ export function ServicePageShell({
                           <FieldLabel>Repository</FieldLabel>
                           <div className="space-y-3 border border-zinc-700 bg-zinc-900/88 p-4">
                             <div className="flex items-center justify-between gap-3">
-                              <div className="text-[18px] text-zinc-100">{settings.repoFullName || "Disconnected"}</div>
+                              <div className="break-all text-[18px] text-zinc-100">{settings.repoFullName || settings.repoUrl || "Disconnected"}</div>
                               <div className="flex items-center gap-2">
                                 <button type="button" className={shellButton("secondary")} onClick={() => setSourcePickerOpen(true)}>
                                   <AppIcon icon={PencilEdit02Icon} size={15} />
@@ -548,7 +552,7 @@ export function ServicePageShell({
                                   type="button"
                                   className={shellButton("ghost")}
                                   onClick={() => {
-                                    setSettings((current) => ({ ...current, repoFullName: "" }));
+                                    setSettings((current) => ({ ...current, repoFullName: "", repoUrl: "" }));
                                     setSourceQuery("");
                                     setSourceRepos([]);
                                     setSourcePickerOpen(false);
@@ -564,16 +568,20 @@ export function ServicePageShell({
 
                         <div className="relative">
                           <FieldLabel>Branch</FieldLabel>
-                          <button
-                            type="button"
-                            className="flex h-11 w-full items-center justify-between border border-zinc-700 bg-zinc-900 px-3 text-left text-sm text-zinc-100"
-                            onClick={() => setBranchMenuOpen((current) => !current)}
-                            disabled={!settings.repoFullName}
-                          >
-                            <span>{settings.branch || "Select branch"}</span>
-                            <AppIcon icon={ArrowLeft01Icon} size={16} className={branchMenuOpen ? "rotate-90" : "-rotate-90"} />
-                          </button>
-                          {branchMenuOpen ? (
+                          {isGitUrlSource ? (
+                            <FormInput value={settings.branch} onChange={(event) => setSettings({ ...settings, branch: event.target.value })} placeholder="main" />
+                          ) : (
+                            <button
+                              type="button"
+                              className="flex h-11 w-full items-center justify-between border border-zinc-700 bg-zinc-900 px-3 text-left text-sm text-zinc-100"
+                              onClick={() => setBranchMenuOpen((current) => !current)}
+                              disabled={!settings.repoFullName}
+                            >
+                              <span>{settings.branch || "Select branch"}</span>
+                              <AppIcon icon={ArrowLeft01Icon} size={16} className={branchMenuOpen ? "rotate-90" : "-rotate-90"} />
+                            </button>
+                          )}
+                          {!isGitUrlSource && branchMenuOpen ? (
                             <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 max-h-64 overflow-auto border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
                               {(settingsBranches.length ? settingsBranches : [settings.branch]).map((branch) => (
                                 <button
@@ -597,18 +605,22 @@ export function ServicePageShell({
 
                         <div>
                           <FieldLabel>Directory</FieldLabel>
-                          <div className="flex h-11 items-center justify-between gap-3 border border-zinc-700 bg-zinc-900 px-3">
-                            <div className="truncate text-sm text-zinc-100">{settings.rootDir || "."}</div>
-                            <button
-                              type="button"
-                              className="inline-flex h-9 items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:opacity-60"
-                              onClick={() => setDirectoryPickerOpen(true)}
-                              disabled={!settings.repoFullName}
-                            >
-                              <AppIcon icon={PencilEdit02Icon} size={15} />
-                              Edit
-                            </button>
-                          </div>
+                          {isGitUrlSource ? (
+                            <FormInput value={settings.rootDir} onChange={(event) => setSettings({ ...settings, rootDir: event.target.value })} placeholder="." />
+                          ) : (
+                            <div className="flex h-11 items-center justify-between gap-3 border border-zinc-700 bg-zinc-900 px-3">
+                              <div className="truncate text-sm text-zinc-100">{settings.rootDir || "."}</div>
+                              <button
+                                type="button"
+                                className="inline-flex h-9 items-center justify-center gap-2 border border-zinc-800 bg-zinc-900/70 px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200 transition hover:border-zinc-700 hover:bg-zinc-900 disabled:opacity-60"
+                                onClick={() => setDirectoryPickerOpen(true)}
+                                disabled={!settings.repoFullName}
+                              >
+                                <AppIcon icon={PencilEdit02Icon} size={15} />
+                                Edit
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -696,6 +708,7 @@ export function ServicePageShell({
           setSettings((current) => ({
             ...current,
             repoFullName: repo.fullName,
+            repoUrl: "",
             branch: repo.defaultBranch,
             rootDir: ""
           }));
