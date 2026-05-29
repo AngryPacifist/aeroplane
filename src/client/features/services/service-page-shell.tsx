@@ -12,7 +12,8 @@ import {
   VariableIcon,
   VideoConsoleIcon,
   CloudServerIcon,
-  DashboardSquare02Icon
+  DashboardSquare02Icon,
+  DatabaseExportIcon
 } from "@hugeicons/core-free-icons";
 import { FormEvent, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -36,6 +37,7 @@ import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from ".
 import { DirectoryPickerModal } from "../../components/modals/directory-picker";
 import { SourcePickerModal } from "../../components/modals/source-picker";
 import { DatabaseServiceSettingsPanel } from "../../components/modals/database-service-settings-panel";
+import { DatabaseBackupsPanel } from "../../components/modals/database-backups-panel";
 import { DatabaseBrowserPanel } from "../../components/modals/database-browser-panel";
 import { DatabaseSqlConsolePanel } from "../../components/modals/database-sql-console-panel";
 import { RedisBrowserPanel } from "../../components/modals/redis-browser-panel";
@@ -55,6 +57,7 @@ const serviceTabLabels: Record<ServiceTab, string> = {
   domains: "Domains",
   data: "Data",
   sql: "Console",
+  backups: "Backups",
   settings: "Settings"
 };
 
@@ -399,6 +402,7 @@ export function ServicePageShell({
   const databaseTabs: Array<[ServiceTab, unknown]> = [
     ["overview", DashboardSquare02Icon],
     ["data", DatabaseIcon],
+    ["backups", DatabaseExportIcon],
     ["deployments", PackageIcon],
     ["logs", LeftToRightListStarIcon],
     ["environment", VariableIcon],
@@ -417,7 +421,7 @@ export function ServicePageShell({
   const viewportClass = "relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col px-5 py-10 sm:px-6 lg:px-10";
   const panelClass = "flex min-h-0 w-full flex-1 flex-col";
   const tabButtonClass = (tab: ServiceTab) => `${chipClass(selectedTab === tab)} !py-1`;
-  const tabUsesContainedScroll = selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql";
+  const tabUsesContainedScroll = selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql" || selectedTab === "backups";
   const contentClass = `mt-6 min-h-0 flex-1 ${tabUsesContainedScroll ? "overflow-hidden" : "overflow-y-auto"}`;
 
   useEffect(() => {
@@ -426,7 +430,7 @@ export function ServicePageShell({
       onTabChange("deployments");
     } else if (isDatabase && selectedTab === "sql" && !hasSqlConsole) {
       onTabChange("deployments");
-    } else if (!isDatabase && (selectedTab === "data" || selectedTab === "sql")) {
+    } else if (!isDatabase && (selectedTab === "data" || selectedTab === "sql" || selectedTab === "backups")) {
       onTabChange("deployments");
     }
   }, [hasSqlConsole, isDatabase, onTabChange, selectedTab, service]);
@@ -499,6 +503,8 @@ export function ServicePageShell({
               ) : null}
 
               {selectedTab === "sql" && hasSqlConsole ? <DatabaseSqlConsolePanel serviceId={serviceId} /> : null}
+
+              {selectedTab === "backups" && isDatabase ? <DatabaseBackupsPanel serviceId={serviceId} /> : null}
 
               {selectedTab === "environment" ? (
                 <ServiceVariablesPanel serviceId={serviceId} env={env} suggestions={suggestions} busy={busy} doAction={doAction} />
