@@ -12,7 +12,7 @@ type ServiceTypeOption = {
 const SERVICE_TYPE_OPTIONS: ServiceTypeOption[] = [
   {
     key: "git",
-    name: "GitHub Repository",
+    name: "Git Repository",
     icon: GithubIcon
   },
   {
