@@ -91,6 +91,45 @@ CREATE TABLE IF NOT EXISTS domains (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS database_backups (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  engine TEXT NOT NULL,
+  status TEXT NOT NULL,
+  storage TEXT NOT NULL,
+  format TEXT NOT NULL,
+  local_path TEXT,
+  r2_key TEXT,
+  size_bytes INTEGER,
+  checksum TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_login_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  user_agent TEXT,
+  ip_address TEXT,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 `);
 
 function hasColumn(table: string, column: string) {
@@ -133,6 +172,10 @@ CREATE INDEX IF NOT EXISTS idx_env_project_key ON env_vars(project_id, key);
 CREATE INDEX IF NOT EXISTS idx_project_groups_slug ON project_groups(slug);
 CREATE INDEX IF NOT EXISTS idx_services_project_group ON projects(project_group_id);
 CREATE INDEX IF NOT EXISTS idx_services_slug ON projects(slug);
+CREATE INDEX IF NOT EXISTS idx_database_backups_service_created ON database_backups(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 `);
 
 const projectGroupSlugRows = sqlite.prepare("SELECT slug FROM project_groups").all() as Array<{ slug: string }>;
