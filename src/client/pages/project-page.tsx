@@ -17,6 +17,7 @@ import { api, type ProjectDetail } from "../api";
 import { AppIcon, FieldLabel, FormInput, FrameworkMark, shellButton } from "../components/ui/primitives";
 import { CreateServiceModal } from "../components/modals/create-service-modal";
 import { DeleteProjectModal } from "../components/modals/delete-project-modal";
+import { SignOutButton } from "../components/auth/sign-out-button";
 import type { ServiceFormPayload } from "../features/services/service-form-types";
 import { formatTime } from "../lib/format";
 import { usePageTitle } from "../lib/page-title";
@@ -212,6 +213,7 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
               >
                 <AppIcon icon={Delete02Icon} size={16} />
               </button>
+              <SignOutButton className="h-10 w-10 bg-transparent" />
             </div>
           </section>
 
