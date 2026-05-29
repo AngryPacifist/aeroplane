@@ -2,6 +2,7 @@ import { ArrowDown01Icon, ArrowLeft01Icon, CloudServerIcon, GithubIcon } from "@
 import { useEffect, useRef, useState } from "react";
 import type { Service } from "../../api";
 import { DeployPlaneIcon } from "../../components/icons/deploy-plane-icon";
+import { SignOutButton } from "../../components/auth/sign-out-button";
 import { AppIcon, FrameworkMark } from "../../components/ui/primitives";
 
 export function ServicePageToolbar({
@@ -93,15 +94,18 @@ export function ServicePageToolbar({
         </div>
       </div>
 
-      <button
-        type="button"
-        className="inline-flex h-9 items-center justify-center gap-2 border border-[#4FB8B2]/45 bg-[#4FB8B2]/12 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9af4ee] transition hover:bg-[#4FB8B2]/20 disabled:opacity-60"
-        onClick={onDeploy}
-        disabled={deploying}
-      >
-        <DeployPlaneIcon size={16} />
-        Deploy
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="inline-flex h-9 items-center justify-center gap-2 border border-[#4FB8B2]/45 bg-[#4FB8B2]/12 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9af4ee] transition hover:bg-[#4FB8B2]/20 disabled:opacity-60"
+          onClick={onDeploy}
+          disabled={deploying}
+        >
+          <DeployPlaneIcon size={16} />
+          Deploy
+        </button>
+        <SignOutButton className="bg-zinc-950/70" />
+      </div>
     </div>
   );
 }
