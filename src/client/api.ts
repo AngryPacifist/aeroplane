@@ -197,6 +197,7 @@ export type OnboardingPayload = {
     caddyReloadCmd: string;
     port: number;
     publicUrl: string;
+    controlPlaneHostname?: string;
     hostPortStart: number;
     hostPortEnd: number;
     buildkitHost: string;
@@ -428,9 +429,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ apiToken, projectId, config })
     }),
-  systemSettings: () => request<{ settings: { rootDomain: string }; publicIp: string; dnsStatus?: "active" | "pending" }>("/api/system/settings"),
-  updateSystemSettings: (body: { rootDomain: string }) =>
-    request<{ ok: boolean; settings: { rootDomain: string } }>("/api/system/settings", {
+  systemSettings: () =>
+    request<{
+      settings: { rootDomain: string; controlPlaneHostname: string };
+      publicIp: string;
+      dnsStatus?: "active" | "pending";
+      controlPlaneDnsStatus?: "active" | "pending";
+    }>("/api/system/settings"),
+  updateSystemSettings: (body: { rootDomain?: string; controlPlaneHostname?: string }) =>
+    request<{ ok: boolean; settings: { rootDomain: string; controlPlaneHostname: string }; caddy?: { ok: boolean; detail: string } }>("/api/system/settings", {
       method: "POST",
       body: JSON.stringify(body)
     }),
