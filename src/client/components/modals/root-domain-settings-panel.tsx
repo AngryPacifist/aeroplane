@@ -10,14 +10,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import { isWildcardRootDomain, normalizeRootDomain, wildcardRootDomain } from "../../lib/root-domain";
 import { AppIcon, FieldLabel, FormInput, shellButton, statusClass } from "../ui/primitives";
 
-function cleanDomain(value: string) {
-  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").replace(/\.+$/, "");
-}
-
 function recordNameFor(domain: string) {
-  return domain ? `*.${domain}` : "*.your-domain.com";
+  return wildcardRootDomain(domain) || "*.your-domain.com";
 }
 
 export function RootDomainSettingsPanel({ open }: { open: boolean }) {
@@ -33,7 +30,8 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
 
-  const normalizedRootDomain = useMemo(() => cleanDomain(rootDomain), [rootDomain]);
+  const normalizedRootDomain = useMemo(() => normalizeRootDomain(rootDomain), [rootDomain]);
+  const rootDomainUsesWildcard = isWildcardRootDomain(rootDomain);
   const hasSavedDomain = savedRootDomain.length > 0;
   const hasUnsavedChanges = normalizedRootDomain !== savedRootDomain;
   const wildcardHostname = recordNameFor(savedRootDomain || normalizedRootDomain);
@@ -46,8 +44,8 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
       setSuccess("");
       try {
         const res = await api.systemSettings();
-        const loadedDomain = cleanDomain(res.settings.rootDomain);
-        setRootDomain(loadedDomain);
+        const loadedDomain = normalizeRootDomain(res.settings.rootDomain);
+        setRootDomain(wildcardRootDomain(loadedDomain));
         setSavedRootDomain(loadedDomain);
         setEditingDomain(!loadedDomain);
         setInstructionsOpen(false);
@@ -77,9 +75,9 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
     setSuccess("");
     try {
       const res = await api.systemSettings();
-      const loadedDomain = cleanDomain(res.settings.rootDomain);
+      const loadedDomain = normalizeRootDomain(res.settings.rootDomain);
       const nextStatus = res.dnsStatus || "pending";
-      setRootDomain(loadedDomain);
+      setRootDomain(wildcardRootDomain(loadedDomain));
       setSavedRootDomain(loadedDomain);
       setDnsStatus(nextStatus);
       setPublicIp(res.publicIp || "127.0.0.1");
@@ -93,6 +91,10 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
 
   async function saveSettings(event: FormEvent) {
     event.preventDefault();
+    if (!rootDomainUsesWildcard || !normalizedRootDomain) {
+      setError("Root domain must be a wildcard hostname like *.pilot.aeroplane.run.");
+      return;
+    }
     setSaving(true);
     setError("");
     setSuccess("");
@@ -100,8 +102,8 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
     try {
       await api.updateSystemSettings({ rootDomain: normalizedRootDomain });
       const res = await api.systemSettings();
-      const savedDomain = cleanDomain(res.settings.rootDomain);
-      setRootDomain(savedDomain);
+      const savedDomain = normalizeRootDomain(res.settings.rootDomain);
+      setRootDomain(wildcardRootDomain(savedDomain));
       setSavedRootDomain(savedDomain);
       setDnsStatus(res.dnsStatus || "pending");
       setPublicIp(res.publicIp || "127.0.0.1");
@@ -148,7 +150,7 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
             </div>
             <h3 className="mt-6 font-hero text-2xl tracking-tight text-zinc-100">Set a root domain</h3>
             <p className="mt-3 text-sm leading-relaxed text-zinc-400">
-              Aeroplane uses this domain to create default URLs for every service, like api.your-domain.com.
+              Aeroplane uses a wildcard DNS record to create default URLs for every service, like api.your-domain.com.
             </p>
             <button type="button" className={`${shellButton("primary")} mt-8`} onClick={() => setEditingDomain(true)}>
               <AppIcon icon={AddSquareIcon} size={16} />
@@ -166,28 +168,34 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
             </div>
             <div>
               <h3 className="font-hero text-lg tracking-tight text-zinc-100">{hasSavedDomain ? "Change root domain" : "Set root domain"}</h3>
-              <p className="mt-1 text-sm leading-relaxed text-zinc-400">Enter the domain Aeroplane should use for generated service URLs.</p>
+              <p className="mt-1 text-sm leading-relaxed text-zinc-400">Enter the wildcard DNS hostname Aeroplane should use for generated service URLs.</p>
             </div>
           </div>
 
           <div>
-            <FieldLabel>Root domain</FieldLabel>
+            <FieldLabel>Wildcard root domain</FieldLabel>
             <FormInput
               value={rootDomain}
-              onBlur={() => setRootDomain(normalizedRootDomain)}
+              onBlur={() => {
+                if (rootDomainUsesWildcard) setRootDomain(wildcardRootDomain(normalizedRootDomain));
+              }}
               onChange={(event) => setRootDomain(event.target.value)}
-              placeholder="pilot.aeroplane.run"
+              placeholder="*.pilot.aeroplane.run"
               required
               inputMode="url"
               autoComplete="off"
             />
-            <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-500">
-              Services will receive URLs like <span className="text-[#4FB8B2]">{"{slug}"}.{normalizedRootDomain || "your-domain.com"}</span>.
-            </p>
+            {rootDomain.trim() && !rootDomainUsesWildcard ? (
+              <p className="mt-2 font-mono text-[10px] leading-relaxed text-rose-300">Include the wildcard prefix, e.g. *.pilot.aeroplane.run.</p>
+            ) : (
+              <p className="mt-2 font-mono text-[10px] leading-relaxed text-zinc-500">
+                Services will receive URLs like <span className="text-[#4FB8B2]">{"{slug}"}.{normalizedRootDomain || "your-domain.com"}</span>.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button type="submit" className={shellButton("primary")} disabled={saving || !normalizedRootDomain || !hasUnsavedChanges}>
+            <button type="submit" className={shellButton("primary")} disabled={saving || !normalizedRootDomain || !hasUnsavedChanges || !rootDomainUsesWildcard}>
               {saving ? "Saving..." : "Save root domain"}
             </button>
             {hasSavedDomain ? (
@@ -195,7 +203,7 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
                 type="button"
                 className={shellButton("ghost")}
                 onClick={() => {
-                  setRootDomain(savedRootDomain);
+                  setRootDomain(wildcardRootDomain(savedRootDomain));
                   setEditingDomain(false);
                 }}
                 disabled={saving}
@@ -212,8 +220,8 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
           <div className="border border-zinc-800 bg-zinc-950/45 p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Root domain</div>
-                <h3 className="mt-2 font-hero text-2xl tracking-tight text-zinc-100">{savedRootDomain}</h3>
+                <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Wildcard root domain</div>
+                <h3 className="mt-2 font-hero text-2xl tracking-tight text-zinc-100">{wildcardRootDomain(savedRootDomain)}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-400">
                   New services will get default URLs like <span className="text-[#4FB8B2]">api.{savedRootDomain}</span>.
                 </p>
@@ -226,7 +234,7 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
                   type="button"
                   className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-[#4FB8B2]/45 hover:bg-[#4FB8B2]/10 hover:text-[#7fe3dd] disabled:opacity-55"
                   onClick={() => {
-                    setRootDomain(savedRootDomain);
+                    setRootDomain(wildcardRootDomain(savedRootDomain));
                     setEditingDomain(true);
                   }}
                   disabled={saving}
