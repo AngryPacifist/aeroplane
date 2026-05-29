@@ -10,6 +10,7 @@ export type OnboardingForm = {
   caddyReloadCmd: string;
   port: string;
   publicUrl: string;
+  controlPlaneHostname: string;
   hostPortStart: string;
   hostPortEnd: string;
   buildkitHost: string;
@@ -40,6 +41,7 @@ export const defaultOnboardingForm: OnboardingForm = {
   caddyReloadCmd: "caddy reload --config ./data/Caddyfile",
   port: "4310",
   publicUrl: "http://localhost:5173",
+  controlPlaneHostname: "",
   hostPortStart: "4100",
   hostPortEnd: "4999",
   buildkitHost: "tcp://127.0.0.1:1234",
