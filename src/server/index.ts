@@ -11,7 +11,7 @@ import net from "node:net";
 import dns from "node:dns/promises";
 import { networkInterfaces } from "node:os";
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
@@ -99,7 +99,7 @@ const publicHostnameSchema = z.preprocess((value) => {
 
 const serviceSettingsSchema = z.object({
   name: z.string().trim().min(1),
-  repoFullName: repoFullNameSchema,
+  repoFullName: repoFullNameSchema.nullish(),
   repoUrl: repoSchema.optional(),
   branch: z.string().trim().min(1).default("main"),
   rootDir: optionalRootDir,
@@ -215,6 +215,13 @@ const restartOnboardingSchema = setupSchema.pick({
 const createServiceSchema = serviceSettingsSchema.extend({
   name: z.string().trim().min(1),
   env: z.array(envSchema).optional().default([])
+}).superRefine((value, ctx) => {
+  if (value.repoFullName || value.repoUrl) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["repoUrl"],
+    message: "Choose a GitHub repository, Git URL, or database"
+  });
 });
 
 const updateServiceSchema = z.object({
@@ -265,6 +272,22 @@ function normalizeEnvValue(value: string) {
     return trimmed.slice(1, -1);
   }
   return trimmed;
+}
+
+function currentRuntimeConfig() {
+  return {
+    dataDir: resolve(process.env.DATA_DIR ?? config.dataDir),
+    deployDryRun: (process.env.DEPLOY_DRY_RUN ?? String(config.deployDryRun)) === "true",
+    caddyConfigPath: resolve(process.env.CADDY_CONFIG_PATH ?? config.caddyConfigPath),
+    caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? config.caddyReloadCmd,
+    port: Number(process.env.PORT ?? config.port),
+    publicUrl: process.env.PUBLIC_URL ?? config.publicUrl,
+    controlPlaneHostname: String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? ""),
+    hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? config.hostPortStart),
+    hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? config.hostPortEnd),
+    buildkitHost: process.env.BUILDKIT_HOST ?? config.buildkitHost,
+    runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? config.runtimeNetworkName
+  };
 }
 
 type RuntimeLog = {
@@ -454,15 +477,16 @@ async function summarizeProject(project: ProjectGroup, projectServices: Service[
 function createServiceRecord(projectId: string, input: z.infer<typeof createServiceSchema>) {
   const timestamp = nowIso();
   const serviceSlug = createUniqueSlug(input.name, getServiceSlugSet(projectId));
-  const repoUrl = input.repoUrl ?? repoUrlFromFullName(input.repoFullName);
-  const isDatabase = repoUrl === "database" || input.repoFullName.startsWith("database:");
+  const repoFullName = input.repoFullName ?? null;
+  const repoUrl = input.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
+  const isDatabase = repoUrl === "database" || (repoFullName?.startsWith("database:") ?? false);
 
   const service: Service = {
     id: nanoid(10),
     projectId,
     slug: serviceSlug,
     name: input.name,
-    repoFullName: input.repoFullName,
+    repoFullName,
     repoUrl,
     branch: input.branch,
     rootDir: input.rootDir ?? null,
@@ -617,7 +641,8 @@ function publicAuthStatus(c: Parameters<typeof getCurrentUser>[0]) {
     user,
     secretKeyConfigured: hasSecretKey(),
     envPath: managedEnvPath(),
-    publicIp: cachedPublicIp
+    publicIp: cachedPublicIp,
+    runtimeConfig: currentRuntimeConfig()
   };
 }
 
@@ -683,6 +708,7 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
     rootDomain: input.rootDomain === undefined ? settings.rootDomain : normalizeRootDomain(input.rootDomain),
     r2
   });
+  await writeAndReloadCaddy();
 
   return envPath;
 }
@@ -965,7 +991,9 @@ app.post("/api/projects/:projectId/services", async (c) => {
     return jsonError(body.error.issues[0]?.message ?? "Invalid service");
   }
 
-  if (isDatabaseService({ repoUrl: body.data.repoUrl ?? repoUrlFromFullName(body.data.repoFullName), repoFullName: body.data.repoFullName }) && body.data.databasePublicEnabled && !body.data.databasePublicHostname) {
+  const repoFullName = body.data.repoFullName ?? null;
+  const repoUrl = body.data.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
+  if (isDatabaseService({ repoUrl, repoFullName }) && body.data.databasePublicEnabled && !body.data.databasePublicHostname) {
     return jsonError("Public database hostname is required");
   }
 
