@@ -50,7 +50,7 @@ import {
   publicUser,
   requireAuth
 } from "./auth.js";
-import { managedEnvPath, writeManagedEnv } from "./env-file.js";
+import { managedEnvPath, writeManagedEnv, writeManagedEnvPatch } from "./env-file.js";
 import { generateSecretKey, hasSecretKey } from "./secret-crypto.js";
 import {
   createDatabaseBackup,
@@ -185,6 +185,7 @@ const setupSchema = z.object({
     caddyReloadCmd: z.string().trim().min(1).default("caddy reload --config ./data/Caddyfile"),
     port: z.coerce.number().int().min(1).max(65535).default(4310),
     publicUrl: z.string().trim().min(1).default("http://localhost:5173"),
+    controlPlaneHostname: publicHostnameSchema,
     hostPortStart: z.coerce.number().int().min(1).max(65535).default(4100),
     hostPortEnd: z.coerce.number().int().min(1).max(65535).default(4999),
     buildkitHost: z.string().trim().min(1).default("tcp://127.0.0.1:1234"),
@@ -249,6 +250,10 @@ const searchSchema = z.object({
 
 function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
+}
+
+function normalizeRootDomain(value: string | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").replace(/\.+$/, "").replace(/^\*\./, "");
 }
 
 function normalizeEnvValue(value: string) {
@@ -626,6 +631,7 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
     CADDY_RELOAD_CMD: input.env.caddyReloadCmd,
     PORT: input.env.port,
     PUBLIC_URL: input.env.publicUrl,
+    CONTROL_PLANE_HOSTNAME: input.env.controlPlaneHostname,
     DEPLOY_HOST_PORT_START: input.env.hostPortStart,
     DEPLOY_HOST_PORT_END: input.env.hostPortEnd,
     BUILDKIT_HOST: input.env.buildkitHost,
@@ -674,7 +680,7 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
   const envPath = writeManagedEnv(managedEnv);
   saveSystemSettings({
     ...settings,
-    rootDomain: input.rootDomain?.trim().toLowerCase() ?? settings.rootDomain,
+    rootDomain: input.rootDomain === undefined ? settings.rootDomain : normalizeRootDomain(input.rootDomain),
     r2
   });
 
@@ -751,18 +757,39 @@ app.get("/api/system", async (c) => c.json(await getSystemChecks()));
 
 app.get("/api/system/settings", async (c) => {
   const settings = getSystemSettings();
+  const rootDomain = normalizeRootDomain(settings.rootDomain);
   let dnsStatus = "pending";
-  if (settings.rootDomain) {
-    dnsStatus = await checkDomainDns(`dns-test.${settings.rootDomain}`, cachedPublicIp);
+  let controlPlaneDnsStatus = "pending";
+  const controlPlaneHostname = String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+  if (rootDomain) {
+    dnsStatus = await checkDomainDns(`dns-test.${rootDomain}`, cachedPublicIp);
   }
-  return c.json({ settings, publicIp: cachedPublicIp, dnsStatus });
+  if (controlPlaneHostname) {
+    controlPlaneDnsStatus = await checkDomainDns(controlPlaneHostname, cachedPublicIp);
+  }
+  return c.json({ settings: { rootDomain, controlPlaneHostname }, publicIp: cachedPublicIp, dnsStatus, controlPlaneDnsStatus });
 });
 
 app.post("/api/system/settings", async (c) => {
   const body = await c.req.json();
-  const rootDomain = String(body.rootDomain ?? "").trim().toLowerCase();
-  saveSystemSettings({ ...getSystemSettings(), rootDomain });
-  return c.json({ ok: true, settings: { rootDomain } });
+  const settings = getSystemSettings();
+  const hasRootDomain = Object.prototype.hasOwnProperty.call(body, "rootDomain");
+  const hasControlPlaneHostname = Object.prototype.hasOwnProperty.call(body, "controlPlaneHostname");
+  const rootDomain = hasRootDomain ? normalizeRootDomain(String(body.rootDomain ?? "")) : normalizeRootDomain(settings.rootDomain);
+
+  let controlPlaneHostname = String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+  if (hasControlPlaneHostname) {
+    const parsed = publicHostnameSchema.safeParse(body.controlPlaneHostname);
+    if (!parsed.success) {
+      return jsonError(parsed.error.issues[0]?.message ?? "Invalid dashboard domain");
+    }
+    controlPlaneHostname = parsed.data ?? "";
+    writeManagedEnvPatch({ CONTROL_PLANE_HOSTNAME: controlPlaneHostname });
+  }
+
+  saveSystemSettings({ ...settings, rootDomain });
+  const caddy = await writeAndReloadCaddy();
+  return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname }, caddy });
 });
 
 app.get("/api/system/r2", (c) => c.json({ r2: publicR2Settings() }));
