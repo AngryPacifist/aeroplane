@@ -20,11 +20,19 @@ function localPortAddress(hostPort: number) {
 }
 
 function staticSiteDirForService(serviceId: string) {
-  return resolve(config.dataDir, "static-sites", serviceId);
+  return resolve(process.env.DATA_DIR ?? config.dataDir, "static-sites", serviceId);
 }
 
 function currentControlPlaneHostname() {
   return String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+}
+
+function currentCaddyConfigPath() {
+  return resolve(process.env.CADDY_CONFIG_PATH ?? config.caddyConfigPath);
+}
+
+function currentCaddyReloadCmd() {
+  return process.env.CADDY_RELOAD_CMD ?? config.caddyReloadCmd;
 }
 
 function controlPlaneBlock() {
@@ -126,10 +134,11 @@ export function renderCaddyfile() {
 }
 
 export async function writeAndReloadCaddy() {
-  mkdirSync(dirname(config.caddyConfigPath), { recursive: true });
-  writeFileSync(config.caddyConfigPath, renderCaddyfile(), "utf8");
+  const caddyConfigPath = currentCaddyConfigPath();
+  mkdirSync(dirname(caddyConfigPath), { recursive: true });
+  writeFileSync(caddyConfigPath, renderCaddyfile(), "utf8");
 
-  const [cmd, ...args] = shellWords(config.caddyReloadCmd);
+  const [cmd, ...args] = shellWords(currentCaddyReloadCmd());
   if (!cmd) {
     return { ok: false, detail: "CADDY_RELOAD_CMD is empty" };
   }
