@@ -10,6 +10,8 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import dns from "node:dns/promises";
 import { networkInterfaces } from "node:os";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
@@ -35,8 +37,27 @@ import { getSystemChecks } from "./system.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
-import { getSystemSettings, saveSystemSettings } from "./system-settings.js";
+import { getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
+import { ensureR2Bucket } from "./r2-storage.js";
+import {
+  authenticateUser,
+  clearSession,
+  createOwner,
+  createSession,
+  getCurrentUser,
+  hasAuthUsers,
+  publicUser,
+  requireAuth
+} from "./auth.js";
+import { managedEnvPath, writeManagedEnv } from "./env-file.js";
+import { generateSecretKey, hasSecretKey } from "./secret-crypto.js";
+import {
+  createDatabaseBackup,
+  deleteDatabaseBackup,
+  getDatabaseBackupFile,
+  listDatabaseBackups
+} from "./database-backups.js";
 import {
   deleteDatabaseRow,
   getDatabaseRows,
@@ -136,6 +157,59 @@ const databaseDeleteSchema = z.object({
   table: z.string().trim().min(1),
   primaryKey: databaseRowSchema
 });
+const backupCreateSchema = z.object({
+  storage: z.enum(["disk", "disk+r2"]).default("disk")
+});
+const r2ConnectionSchema = z.object({
+  accountId: z.string().trim().min(1).transform((value) => value.toLowerCase()),
+  bucket: z.string().trim().min(1).regex(/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/i, "Use a valid R2 bucket name").transform((value) => value.toLowerCase()),
+  accessKeyId: z.string().trim().min(1),
+  secretAccessKey: z.string().min(1).optional(),
+  createBucket: z.boolean().optional().default(true)
+});
+const loginSchema = z.object({
+  email: z.string().trim().email().transform((value) => value.toLowerCase()),
+  password: z.string().min(1)
+});
+const setupSchema = z.object({
+  owner: z.object({
+    name: z.string().trim().min(1),
+    email: z.string().trim().email().transform((value) => value.toLowerCase()),
+    password: z.string().min(8)
+  }),
+  env: z.object({
+    secretKey: optionalString,
+    dataDir: z.string().trim().min(1).default("./data"),
+    deployDryRun: z.boolean().default(false),
+    caddyConfigPath: z.string().trim().min(1).default("./data/Caddyfile"),
+    caddyReloadCmd: z.string().trim().min(1).default("caddy reload --config ./data/Caddyfile"),
+    port: z.coerce.number().int().min(1).max(65535).default(4310),
+    publicUrl: z.string().trim().min(1).default("http://localhost:5173"),
+    hostPortStart: z.coerce.number().int().min(1).max(65535).default(4100),
+    hostPortEnd: z.coerce.number().int().min(1).max(65535).default(4999),
+    buildkitHost: z.string().trim().min(1).default("tcp://127.0.0.1:1234"),
+    runtimeNetworkName: z.string().trim().min(1).default("aeroplane-runtime"),
+    githubAccessToken: optionalString,
+    githubAppId: optionalString,
+    githubAppClientId: optionalString,
+    githubAppSlug: optionalString,
+    githubAppPrivateKey: optionalString,
+    githubWebhookSecret: optionalString
+  }),
+  rootDomain: optionalString,
+  r2: z.object({
+    accountId: optionalString,
+    bucket: optionalString,
+    accessKeyId: optionalString,
+    secretAccessKey: optionalString,
+    createBucket: z.boolean().default(true)
+  }).optional()
+});
+const restartOnboardingSchema = setupSchema.pick({
+  env: true,
+  rootDomain: true,
+  r2: true
+});
 
 const createServiceSchema = serviceSettingsSchema.extend({
   name: z.string().trim().min(1),
@@ -170,7 +244,7 @@ const domainSchema = z.object({
 
 const searchSchema = z.object({
   service: z.string().optional(),
-  tab: z.enum(["deployments", "logs", "environment", "domains", "data", "sql", "settings"]).optional()
+  tab: z.enum(["deployments", "logs", "environment", "domains", "data", "sql", "backups", "settings"]).optional()
 });
 
 function jsonError(message: string, status = 400) {
@@ -529,7 +603,149 @@ function syncAllExistingDatabaseUrls() {
   }
 }
 
+function publicAuthStatus(c: Parameters<typeof getCurrentUser>[0]) {
+  const setupComplete = hasAuthUsers();
+  const user = setupComplete ? getCurrentUser(c) : null;
+  return {
+    setupComplete,
+    authenticated: Boolean(user),
+    user,
+    secretKeyConfigured: hasSecretKey(),
+    envPath: managedEnvPath(),
+    publicIp: cachedPublicIp
+  };
+}
+
+async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSchema>, options: { generateSecretKeyIfMissing: boolean }) {
+  const secretKey = input.env.secretKey || process.env.AEROPLANE_SECRET_KEY || config.secretKey || (options.generateSecretKeyIfMissing ? generateSecretKey() : "");
+  const managedEnv = {
+    AEROPLANE_SECRET_KEY: secretKey,
+    DATA_DIR: input.env.dataDir,
+    DEPLOY_DRY_RUN: input.env.deployDryRun,
+    CADDY_CONFIG_PATH: input.env.caddyConfigPath,
+    CADDY_RELOAD_CMD: input.env.caddyReloadCmd,
+    PORT: input.env.port,
+    PUBLIC_URL: input.env.publicUrl,
+    DEPLOY_HOST_PORT_START: input.env.hostPortStart,
+    DEPLOY_HOST_PORT_END: input.env.hostPortEnd,
+    BUILDKIT_HOST: input.env.buildkitHost,
+    AEROPLANE_RUNTIME_NETWORK: input.env.runtimeNetworkName,
+    GITHUB_ACCESS_TOKEN: input.env.githubAccessToken ?? process.env.GITHUB_ACCESS_TOKEN,
+    GITHUB_APP_ID: input.env.githubAppId ?? process.env.GITHUB_APP_ID,
+    GITHUB_APP_CLIENT_ID: input.env.githubAppClientId ?? process.env.GITHUB_APP_CLIENT_ID,
+    GITHUB_APP_SLUG: input.env.githubAppSlug ?? process.env.GITHUB_APP_SLUG,
+    GITHUB_APP_PRIVATE_KEY: input.env.githubAppPrivateKey ?? process.env.GITHUB_APP_PRIVATE_KEY,
+    GITHUB_WEBHOOK_SECRET: input.env.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET
+  };
+
+  const settings = getSystemSettings();
+  let r2 = settings.r2 ?? null;
+  if (input.r2?.accountId || input.r2?.bucket || input.r2?.accessKeyId || input.r2?.secretAccessKey) {
+    const parsedR2 = r2ConnectionSchema.safeParse({
+      accountId: input.r2.accountId,
+      bucket: input.r2.bucket,
+      accessKeyId: input.r2.accessKeyId,
+      secretAccessKey: input.r2.secretAccessKey,
+      createBucket: input.r2.createBucket
+    });
+    if (!parsedR2.success) {
+      throw new Error(parsedR2.error.issues[0]?.message ?? "Invalid R2 settings");
+    }
+    if (!parsedR2.data.secretAccessKey) {
+      throw new Error("R2 secret access key is required");
+    }
+
+    const timestamp = nowIso();
+    r2 = {
+      accountId: parsedR2.data.accountId,
+      bucket: parsedR2.data.bucket,
+      accessKeyId: parsedR2.data.accessKeyId,
+      secretAccessKey: parsedR2.data.secretAccessKey,
+      endpoint: `https://${parsedR2.data.accountId}.r2.cloudflarestorage.com`,
+      connectedAt: settings.r2?.connectedAt ?? timestamp,
+      updatedAt: timestamp
+    };
+
+    if (parsedR2.data.createBucket) {
+      await ensureR2Bucket(r2);
+    }
+  }
+
+  const envPath = writeManagedEnv(managedEnv);
+  saveSystemSettings({
+    ...settings,
+    rootDomain: input.rootDomain?.trim().toLowerCase() ?? settings.rootDomain,
+    r2
+  });
+
+  return envPath;
+}
+
+app.get("/api/auth/status", (c) => c.json(publicAuthStatus(c)));
+
+app.post("/api/auth/setup", async (c) => {
+  if (hasAuthUsers()) {
+    return jsonError("Aeroplane has already been set up", 409);
+  }
+
+  const body = setupSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid setup");
+  }
+
+  let envPath = "";
+  try {
+    envPath = await applyOnboardingSettings(body.data, { generateSecretKeyIfMissing: true });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not apply onboarding settings", 400);
+  }
+
+  const user = createOwner(body.data.owner);
+  createSession(c, user);
+  return c.json({ ok: true, user: publicUser(user), envPath, restartRequired: true }, 201);
+});
+
+app.post("/api/auth/login", async (c) => {
+  if (!hasAuthUsers()) {
+    return jsonError("Setup required", 401);
+  }
+
+  const body = loginSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid login");
+  }
+
+  const user = authenticateUser(body.data.email, body.data.password);
+  if (!user) {
+    return jsonError("Invalid email or password", 401);
+  }
+
+  createSession(c, user);
+  return c.json({ ok: true, user: publicUser(user) });
+});
+
+app.post("/api/auth/logout", (c) => {
+  clearSession(c);
+  return c.json({ ok: true });
+});
+
+app.use("/api/*", requireAuth);
+
 app.get("/api/health", (c) => c.json({ ok: true }));
+
+app.post("/api/system/onboarding/restart", async (c) => {
+  const body = restartOnboardingSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid onboarding settings");
+  }
+
+  try {
+    const envPath = await applyOnboardingSettings(body.data, { generateSecretKeyIfMissing: false });
+    return c.json({ ok: true, envPath, restartRequired: true });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not apply onboarding settings", 400);
+  }
+});
 
 app.get("/api/system", async (c) => c.json(await getSystemChecks()));
 
@@ -545,8 +761,59 @@ app.get("/api/system/settings", async (c) => {
 app.post("/api/system/settings", async (c) => {
   const body = await c.req.json();
   const rootDomain = String(body.rootDomain ?? "").trim().toLowerCase();
-  saveSystemSettings({ rootDomain });
+  saveSystemSettings({ ...getSystemSettings(), rootDomain });
   return c.json({ ok: true, settings: { rootDomain } });
+});
+
+app.get("/api/system/r2", (c) => c.json({ r2: publicR2Settings() }));
+
+app.post("/api/system/r2", async (c) => {
+  if (!hasSecretKey()) {
+    return jsonError("AEROPLANE_SECRET_KEY is required before saving R2 credentials", 409);
+  }
+
+  const existing = getSystemSettings();
+  const body = r2ConnectionSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid R2 settings");
+  }
+
+  const timestamp = nowIso();
+  const secretAccessKey = body.data.secretAccessKey || existing.r2?.secretAccessKey;
+  const accessKeyId = body.data.accessKeyId.startsWith("******") ? existing.r2?.accessKeyId : body.data.accessKeyId;
+  if (!secretAccessKey) {
+    return jsonError("Secret access key is required");
+  }
+  if (!accessKeyId) {
+    return jsonError("Access key ID is required");
+  }
+
+  const endpoint = `https://${body.data.accountId}.r2.cloudflarestorage.com`;
+  const r2 = {
+    accountId: body.data.accountId,
+    bucket: body.data.bucket,
+    accessKeyId,
+    secretAccessKey,
+    endpoint,
+    connectedAt: existing.r2?.connectedAt ?? timestamp,
+    updatedAt: timestamp
+  };
+
+  if (body.data.createBucket) {
+    try {
+      await ensureR2Bucket(r2);
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : "Could not create or verify R2 bucket", 400);
+    }
+  }
+
+  saveSystemSettings({ ...existing, r2 });
+  return c.json({ ok: true, r2: publicR2Settings({ ...existing, r2 }) });
+});
+
+app.delete("/api/system/r2", (c) => {
+  saveSystemSettings({ ...getSystemSettings(), r2: null });
+  return c.json({ ok: true, r2: publicR2Settings({ rootDomain: getSystemSettings().rootDomain, r2: null }) });
 });
 
 app.get("/api/system/updates", async (c) => c.json(await getSystemUpdateInfo()));
@@ -931,6 +1198,50 @@ app.delete("/api/services/:serviceId/database/rows", async (c) => {
     return c.json(await deleteDatabaseRow(c.req.param("serviceId"), body.data.table, body.data.primaryKey));
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Could not delete database row", 400);
+  }
+});
+
+app.get("/api/services/:serviceId/database/backups", (c) => {
+  try {
+    return c.json({ backups: listDatabaseBackups(c.req.param("serviceId")), r2: publicR2Settings() });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not load backups", 400);
+  }
+});
+
+app.post("/api/services/:serviceId/database/backups", async (c) => {
+  const body = backupCreateSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid backup request");
+  }
+
+  try {
+    return c.json({ backup: await createDatabaseBackup(c.req.param("serviceId"), body.data.storage) }, 201);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not create backup", 400);
+  }
+});
+
+app.get("/api/services/:serviceId/database/backups/:backupId/download", (c) => {
+  try {
+    const { backup, localPath } = getDatabaseBackupFile(c.req.param("serviceId"), c.req.param("backupId"));
+    const fileName = backup.fileName || basename(localPath);
+    return new Response(readFileSync(localPath), {
+      headers: {
+        "Content-Disposition": `attachment; filename="${fileName}"`,
+        "Content-Type": "application/octet-stream"
+      }
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not download backup", 404);
+  }
+});
+
+app.delete("/api/services/:serviceId/database/backups/:backupId", async (c) => {
+  try {
+    return c.json(await deleteDatabaseBackup(c.req.param("serviceId"), c.req.param("backupId")));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not delete backup", 400);
   }
 });
 
