@@ -11,6 +11,7 @@ import { SystemHealthPill } from "../features/projects/system-health-pill";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import { SystemSettingsModal } from "../components/modals/system-settings-modal";
 import type { SystemSettingsTab } from "../components/modals/system-settings-types";
+import { SignOutButton } from "../components/auth/sign-out-button";
 import { usePageTitle } from "../lib/page-title";
 
 export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab }) {
@@ -114,6 +115,7 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
               >
                 <AppIcon icon={Settings01Icon} size={15} />
               </button>
+              <SignOutButton />
             </div>
           </header>
 
