@@ -54,6 +54,7 @@ interface CommandResult {
 type CommandEnv = NodeJS.ProcessEnv;
 
 const updateRemoteName = "aeroplane-updates";
+const completedRestartRunVisibleMs = 45_000;
 let activeRun: SystemUpdateRun = idleRun();
 let activeUpdate: Promise<void> | null = null;
 
@@ -70,6 +71,13 @@ function idleRun(): SystemUpdateRun {
 }
 
 function snapshotRun() {
+  if (activeRun.status !== "running" && activeRun.restartQueued && activeRun.finishedAt) {
+    const finishedAt = Date.parse(activeRun.finishedAt);
+    if (Number.isFinite(finishedAt) && Date.now() - finishedAt > completedRestartRunVisibleMs) {
+      activeRun = idleRun();
+    }
+  }
+
   return { ...activeRun, logs: [...activeRun.logs] };
 }
 
