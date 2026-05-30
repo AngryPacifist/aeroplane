@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { captureInstallerRequest, shutdownAnalytics } from "./analytics.js";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -59,6 +60,7 @@ const server = createServer(async (req, res) => {
   if (url.pathname === "/" || url.pathname === "/install.sh") {
     try {
       const script = await installerScript();
+      captureInstallerRequest(req, url);
       send(res, 200, textHeaders(), script, method);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to read installer";
@@ -73,3 +75,20 @@ const server = createServer(async (req, res) => {
 server.listen(port, "0.0.0.0", () => {
   console.log(`get-aeroplane listening on http://0.0.0.0:${port}`);
 });
+
+let shuttingDown = false;
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    void shutdownAnalytics()
+      .catch(() => undefined)
+      .finally(() => {
+        server.close(() => process.exit(0));
+      });
+
+    setTimeout(() => process.exit(0), 2500).unref();
+  });
+}
