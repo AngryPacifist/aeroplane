@@ -1,0 +1,22 @@
+---
+import ProductPreview from "./product-preview.astro";
+---
+
+<section class="aero-container grid items-center gap-10 py-12 md:grid-cols-[0.95fr_1.05fr] md:py-20">
+  <div>
+    <p class="mb-4 text-sm font-bold text-[var(--aero-accent)]">SELF-HOSTED DEPLOYMENT CONTROL PLANE</p>
+    <h1 class="max-w-3xl text-5xl font-black leading-[0.98] md:text-7xl">
+      Deploy apps and databases on your own VPS.
+    </h1>
+    <p class="mt-6 max-w-2xl text-lg leading-8 text-[var(--aero-muted)]">
+      Aeroplane gives you Railway-style deployment workflows with Docker, Railpack, Caddy, database tools,
+      backups, domains, logs, and updates on infrastructure you control.
+    </p>
+    <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+      <a class="aero-button" href="#install">Install Aeroplane</a>
+      <a class="aero-button secondary" href="https://github.com/akinloluwami/aeroplane">View source</a>
+    </div>
+  </div>
+
+  <ProductPreview />
+</section>

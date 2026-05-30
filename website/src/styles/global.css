@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --aero-bg: #08090c;
+  --aero-panel: #111318;
+  --aero-panel-soft: #15181e;
+  --aero-border: #343843;
+  --aero-muted: #9699a6;
+  --aero-text: #f4f4f6;
+  --aero-accent: #4fb8b2;
+  --aero-accent-strong: #8df4eb;
+  --aero-pink: #ff4f9a;
+}
+
+html {
+  background: var(--aero-bg);
+  color: var(--aero-text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 20% 0%, rgba(79, 184, 178, 0.16), transparent 34rem),
+    radial-gradient(circle at 80% 10%, rgba(255, 79, 154, 0.08), transparent 30rem),
+    var(--aero-bg);
+  background-size: 72px 72px, 72px 72px, auto, auto, auto;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.aero-container {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+}
+
+.aero-panel {
+  border: 1px solid var(--aero-border);
+  background: rgba(17, 19, 24, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.aero-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgba(141, 244, 235, 0.5);
+  background: rgba(79, 184, 178, 0.16);
+  color: var(--aero-accent-strong);
+  font-weight: 700;
+}
+
+.aero-button.secondary {
+  border-color: var(--aero-border);
+  background: rgba(17, 19, 24, 0.72);
+  color: var(--aero-text);
+}
