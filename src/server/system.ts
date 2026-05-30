@@ -79,10 +79,14 @@ async function checkCaddy() {
   };
 }
 
+function checkDocker() {
+  return checkCommand("docker", ["version", "--format", "client {{.Client.Version}} / server {{.Server.Version}}"]);
+}
+
 export async function getSystemChecks() {
   const [git, docker, railpack, buildkit, caddy] = await Promise.all([
     checkCommand("git"),
-    checkCommand("docker"),
+    checkDocker(),
     checkCommand("railpack"),
     checkTcpReachability("buildkit", config.buildkitHost),
     checkCaddy()
