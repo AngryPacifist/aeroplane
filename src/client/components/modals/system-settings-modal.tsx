@@ -1,6 +1,7 @@
-import { CloudUploadIcon, Globe02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { CloudUploadIcon, GithubIcon, Globe02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { AppIcon, SectionTitle, shellButton, surfaceClass } from "../ui/primitives";
 import { ControlPlaneDomainSettingsPanel } from "./control-plane-domain-settings-panel";
+import { GitHubSettingsPanel } from "./github-settings-panel";
 import { R2StorageSettingsPanel } from "./r2-storage-settings-panel";
 import { RootDomainSettingsPanel } from "./root-domain-settings-panel";
 import type { SystemSettingsTab } from "./system-settings-types";
@@ -8,6 +9,7 @@ import { UpdatesSettingsPanel } from "./updates-settings-panel";
 
 const settingsTabs: Array<{ id: SystemSettingsTab; label: string; icon: unknown }> = [
   { id: "root-domain", label: "Domains", icon: Globe02Icon },
+  { id: "github", label: "GitHub", icon: GithubIcon },
   { id: "storage", label: "Storage", icon: CloudUploadIcon },
   { id: "updates", label: "Updates", icon: Refresh03Icon }
 ];
@@ -79,6 +81,7 @@ export function SystemSettingsModal({
                     <RootDomainSettingsPanel open={open} />
                   </div>
                 ) : null}
+                {activeTab === "github" ? <GitHubSettingsPanel open={open} /> : null}
                 {activeTab === "storage" ? <R2StorageSettingsPanel open={open} /> : null}
                 {activeTab === "updates" ? <UpdatesSettingsPanel open={open} /> : null}
               </div>
