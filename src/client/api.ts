@@ -277,6 +277,7 @@ export type SystemUpdateRun = {
 };
 
 export type SystemUpdateInfo = {
+  installType: "git" | "image";
   repo: string;
   repoUrl: string;
   branch: string;
@@ -290,6 +291,8 @@ export type SystemUpdateInfo = {
   checkedAt: string;
   error: null | string;
   updateRun: SystemUpdateRun;
+  updateCommand: null | string;
+  canApplyUpdate: boolean;
 };
 
 export type ServiceOverview = {
