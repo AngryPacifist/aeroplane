@@ -329,6 +329,20 @@ export type GitHubStatus = {
   mode: "app" | "token" | "none";
 };
 
+export type GitHubSettingsStatus = {
+  status: GitHubStatus;
+  statusError: string;
+  settings: {
+    githubAccessTokenSuffix: string;
+    githubAppId: string;
+    githubAppClientId: string;
+    githubAppSlug: string;
+    githubAppPrivateKeyConfigured: boolean;
+    githubWebhookSecretSuffix: string;
+    envPath: string;
+  };
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -470,6 +484,20 @@ export const api = {
       body: JSON.stringify(body)
     }),
   disconnectR2: () => request<{ ok: boolean; r2: R2SettingsStatus }>("/api/system/r2", { method: "DELETE" }),
+  githubSettings: () => request<GitHubSettingsStatus>("/api/system/github"),
+  updateGithubSettings: (body: {
+    githubAccessToken?: string;
+    githubAppId?: string;
+    githubAppClientId?: string;
+    githubAppSlug?: string;
+    githubAppPrivateKey?: string;
+    githubWebhookSecret?: string;
+  }) =>
+    request<{ ok: boolean } & GitHubSettingsStatus>("/api/system/github", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  disconnectGithub: () => request<{ ok: boolean } & GitHubSettingsStatus>("/api/system/github", { method: "DELETE" }),
   systemUpdates: () => request<SystemUpdateInfo>("/api/system/updates"),
   applySystemUpdate: () =>
     request<{ ok: boolean; updateRun: SystemUpdateRun }>("/api/system/updates/apply", {
