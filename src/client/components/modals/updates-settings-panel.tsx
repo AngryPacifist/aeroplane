@@ -21,6 +21,7 @@ function updateStatusClass(status: SystemUpdateInfo["status"]) {
 
 function updateStatusLabel(info: SystemUpdateInfo | null) {
   if (!info) return "Not checked";
+  if (info.installType === "image" && info.status === "unknown") return "Image install";
   if (info.status === "current") return "Up to date";
   if (info.status === "available") return `${info.commits.length} update${info.commits.length === 1 ? "" : "s"}`;
   if (info.status === "diverged") return "Manual update";
@@ -112,7 +113,7 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
 
   const run = info?.updateRun;
   const updateRunning = run?.status === "running";
-  const canUpdate = Boolean(info && info.status === "available" && !info.dirty && !updateRunning && !applying);
+  const canUpdate = Boolean(info && info.status === "available" && !info.dirty && info.canApplyUpdate && !updateRunning && !applying);
 
   return (
     <div className="space-y-5">
@@ -122,7 +123,9 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Updates</div>
             <h3 className="mt-2 font-hero text-2xl tracking-tight text-zinc-100">Aeroplane release channel</h3>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-              Compare this install with GitHub, review pending commits, and fast-forward when the checkout is clean.
+              {info?.installType === "image"
+                ? "This install is running from the published Docker image. Aeroplane compares the image commit with GitHub and can pull the next image when one is available."
+                : "Compare this install with GitHub, review pending commits, and fast-forward when the checkout is clean."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -161,6 +164,24 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
         </div>
       ) : null}
 
+      {info?.installType === "image" ? (
+        <section className="border border-zinc-800 bg-zinc-950/45 p-5">
+          <h4 className="font-hero text-base tracking-tight text-zinc-100">{info.canApplyUpdate ? "Docker image updates" : "Update from the VPS"}</h4>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
+            {!info.currentCommit
+              ? "This image was built without commit metadata, so Aeroplane cannot compare it with GitHub yet. Publish the image with AEROPLANE_COMMIT_SHA to enable one-click updates."
+              : info.canApplyUpdate
+                ? "Aeroplane will pull the latest GHCR image through a short-lived updater container, then replace the running app container."
+                : "This container does not include a git checkout, and one-click image updates are not configured for this install. Publish a new GHCR image, then run this on the VPS."}
+          </p>
+          {!info.canApplyUpdate || info.status === "unknown" ? (
+            <pre className="mt-4 overflow-x-auto border border-zinc-800 bg-black/35 px-4 py-3 font-mono text-[11px] leading-relaxed text-zinc-300">
+              {info.updateCommand ?? "cd /opt/aeroplane && sudo docker compose pull aeroplane && sudo docker compose up -d aeroplane"}
+            </pre>
+          ) : null}
+        </section>
+      ) : null}
+
       {info?.status === "current" ? (
         <section className="flex min-h-[220px] items-center justify-center border border-zinc-800 bg-zinc-950/45 p-8 text-center">
           <div>
@@ -178,11 +199,13 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
           <div className="flex flex-col gap-3 border-b border-zinc-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h4 className="font-hero text-base tracking-tight text-zinc-100">Pending commits</h4>
-              <p className="mt-1 text-sm text-zinc-400">Review the commits that will be applied in order.</p>
+              <p className="mt-1 text-sm text-zinc-400">
+                {info.installType === "image" ? "Review the commits included in the next published image." : "Review the commits that will be applied in order."}
+              </p>
             </div>
             <button type="button" className={shellButton("primary")} onClick={() => void applyUpdate()} disabled={!canUpdate}>
               <AppIcon icon={Refresh03Icon} size={13} className={applying || updateRunning ? "animate-spin" : ""} />
-              {updateRunning ? "Updating..." : "Update Aeroplane"}
+              {updateRunning ? "Updating..." : info.installType === "image" ? "Pull latest image" : "Update Aeroplane"}
             </button>
           </div>
 
@@ -220,7 +243,9 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
 
       {info?.status === "diverged" ? (
         <div className="border border-rose-500/35 bg-rose-950/30 px-4 py-3 text-sm leading-relaxed text-rose-200">
-          This checkout has diverged from GitHub, so Aeroplane will not update automatically. Pull or reconcile the repository manually.
+          {info.installType === "image"
+            ? "The running image commit is not an ancestor of GitHub main, so Aeroplane will not update automatically. Publish a fresh image manually."
+            : "This checkout has diverged from GitHub, so Aeroplane will not update automatically. Pull or reconcile the repository manually."}
         </div>
       ) : null}
 
