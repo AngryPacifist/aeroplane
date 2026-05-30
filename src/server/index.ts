@@ -777,12 +777,13 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
   }
 
   const envPath = writeManagedEnv(managedEnv);
-  config.controlPlaneHostname = input.env.controlPlaneHostname;
+  const controlPlaneHostname = input.env.controlPlaneHostname ?? "";
+  config.controlPlaneHostname = controlPlaneHostname;
   updateGithubRuntimeEnv(currentGithubEnv());
   saveSystemSettings({
     ...settings,
     rootDomain: input.rootDomain === undefined ? settings.rootDomain : normalizeRootDomain(input.rootDomain),
-    controlPlaneHostname: input.env.controlPlaneHostname,
+    controlPlaneHostname,
     r2
   });
   await writeAndReloadCaddy();
