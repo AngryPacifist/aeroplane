@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { config } from "./config.js";
 
 export type SystemUpdateStatus = "current" | "available" | "diverged" | "unknown";
 export type SystemUpdateRunStatus = "idle" | "running" | "succeeded" | "failed";
+export type SystemUpdateInstallType = "git" | "image";
 
 export interface SystemUpdateCommit {
   sha: string;
@@ -24,6 +27,7 @@ export interface SystemUpdateRun {
 }
 
 export interface SystemUpdateInfo {
+  installType: SystemUpdateInstallType;
   repo: string;
   repoUrl: string;
   branch: string;
@@ -37,6 +41,8 @@ export interface SystemUpdateInfo {
   checkedAt: string;
   error: string | null;
   updateRun: SystemUpdateRun;
+  updateCommand: string | null;
+  canApplyUpdate: boolean;
 }
 
 interface CommandResult {
@@ -77,6 +83,14 @@ function shortSha(sha: string | null) {
 
 function remoteRef() {
   return `refs/remotes/${updateRemoteName}/${config.updateRepoBranch}`;
+}
+
+function updateGitDir() {
+  return join(config.dataDir, "system-updates.git");
+}
+
+function gitArgs(args: string[], gitDir?: string) {
+  return gitDir ? ["--git-dir", gitDir, ...args] : args;
 }
 
 function repoLabel() {
@@ -148,6 +162,37 @@ async function readCommand(command: string, args: string[]) {
   return result.stdout.trim();
 }
 
+async function isGitCheckout() {
+  const result = await runCommand("git", ["rev-parse", "--is-inside-work-tree"]);
+  return result.code === 0 && result.stdout.trim() === "true";
+}
+
+function imageManualUpdateCommand() {
+  return "cd /opt/aeroplane && sudo docker compose pull aeroplane && sudo docker compose up -d aeroplane";
+}
+
+function configuredImageUpdateCommand() {
+  return config.imageUpdateCmd.trim();
+}
+
+function imageUpdateCommand() {
+  return configuredImageUpdateCommand() || imageManualUpdateCommand();
+}
+
+function imageCurrentCommit() {
+  const commit = config.imageCommitSha.trim();
+  return /^[0-9a-f]{7,40}$/i.test(commit) && commit.toLowerCase() !== "unknown" ? commit : null;
+}
+
+async function ensureUpdateGitCache() {
+  mkdirSync(config.dataDir, { recursive: true });
+  const gitDir = updateGitDir();
+  if (!existsSync(join(gitDir, "HEAD"))) {
+    await readCommand("git", ["init", "--bare", gitDir]);
+  }
+  return gitDir;
+}
+
 async function runLogged(command: string, args: string[], envOverrides?: CommandEnv) {
   appendLog(`$ ${commandForLog(command, args)}`);
   const result = await runCommand(command, args, envOverrides);
@@ -162,8 +207,8 @@ async function runLogged(command: string, args: string[], envOverrides?: Command
   }
 }
 
-async function fetchRemote(logged = false) {
-  const args = ["fetch", "--quiet", config.updateRepoUrl, `refs/heads/${config.updateRepoBranch}:${remoteRef()}`];
+async function fetchRemote(logged = false, gitDir?: string) {
+  const args = gitArgs(["fetch", "--quiet", config.updateRepoUrl, `refs/heads/${config.updateRepoBranch}:${remoteRef()}`], gitDir);
   if (logged) {
     await runLogged("git", args);
     return;
@@ -175,21 +220,21 @@ async function getCurrentCommit() {
   return readCommand("git", ["rev-parse", "HEAD"]);
 }
 
-async function getRemoteCommit() {
-  return readCommand("git", ["rev-parse", remoteRef()]);
+async function getRemoteCommit(gitDir?: string) {
+  return readCommand("git", gitArgs(["rev-parse", remoteRef()], gitDir));
 }
 
 async function isWorkingTreeDirty() {
   return (await readCommand("git", ["status", "--porcelain"])).length > 0;
 }
 
-async function isAncestor(base: string, target: string) {
-  const result = await runCommand("git", ["merge-base", "--is-ancestor", base, target]);
+async function isAncestor(base: string, target: string, gitDir?: string) {
+  const result = await runCommand("git", gitArgs(["merge-base", "--is-ancestor", base, target], gitDir));
   return result.code === 0;
 }
 
-async function commitsBetween(base: string, target: string): Promise<SystemUpdateCommit[]> {
-  const output = await readCommand("git", ["log", "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s", `${base}..${target}`]);
+async function commitsBetween(base: string, target: string, gitDir?: string): Promise<SystemUpdateCommit[]> {
+  const output = await readCommand("git", gitArgs(["log", "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%s", `${base}..${target}`], gitDir));
   if (!output) return [];
 
   return output
@@ -225,10 +270,65 @@ function queueRestart() {
   return true;
 }
 
+async function getImageUpdateInfo(checkedAt: string): Promise<SystemUpdateInfo> {
+  const currentCommit = imageCurrentCommit();
+
+  try {
+    const gitDir = await ensureUpdateGitCache();
+    await fetchRemote(false, gitDir);
+    const remoteCommit = await getRemoteCommit(gitDir);
+    const currentIsAncestor = currentCommit ? (currentCommit === remoteCommit ? true : await isAncestor(currentCommit, remoteCommit, gitDir)) : false;
+    const status: SystemUpdateStatus = !currentCommit ? "unknown" : currentCommit === remoteCommit ? "current" : currentIsAncestor ? "available" : "diverged";
+    const commits = currentCommit && status === "available" ? await commitsBetween(currentCommit, remoteCommit, gitDir) : [];
+
+    return {
+      installType: "image",
+      repo: repoLabel(),
+      repoUrl: config.updateRepoUrl,
+      branch: config.updateRepoBranch,
+      currentCommit,
+      currentShortCommit: shortSha(currentCommit),
+      remoteCommit,
+      remoteShortCommit: shortSha(remoteCommit),
+      status,
+      dirty: false,
+      commits,
+      checkedAt,
+      error: null,
+      updateRun: snapshotRun(),
+      updateCommand: imageUpdateCommand(),
+      canApplyUpdate: Boolean(configuredImageUpdateCommand())
+    };
+  } catch (error) {
+    return {
+      installType: "image",
+      repo: repoLabel(),
+      repoUrl: config.updateRepoUrl,
+      branch: config.updateRepoBranch,
+      currentCommit,
+      currentShortCommit: shortSha(currentCommit),
+      remoteCommit: null,
+      remoteShortCommit: null,
+      status: "unknown",
+      dirty: false,
+      commits: [],
+      checkedAt,
+      error: error instanceof Error ? error.message : "Could not check image updates",
+      updateRun: snapshotRun(),
+      updateCommand: imageUpdateCommand(),
+      canApplyUpdate: Boolean(configuredImageUpdateCommand())
+    };
+  }
+}
+
 export async function getSystemUpdateInfo(): Promise<SystemUpdateInfo> {
   const checkedAt = nowIso();
 
   try {
+    if (!(await isGitCheckout())) {
+      return getImageUpdateInfo(checkedAt);
+    }
+
     await fetchRemote();
     const [currentCommit, remoteCommit, dirty] = await Promise.all([getCurrentCommit(), getRemoteCommit(), isWorkingTreeDirty()]);
     const currentIsAncestor = currentCommit === remoteCommit ? true : await isAncestor(currentCommit, remoteCommit);
@@ -236,6 +336,7 @@ export async function getSystemUpdateInfo(): Promise<SystemUpdateInfo> {
     const commits = status === "available" ? await commitsBetween(currentCommit, remoteCommit) : [];
 
     return {
+      installType: "git",
       repo: repoLabel(),
       repoUrl: config.updateRepoUrl,
       branch: config.updateRepoBranch,
@@ -248,10 +349,13 @@ export async function getSystemUpdateInfo(): Promise<SystemUpdateInfo> {
       commits,
       checkedAt,
       error: null,
-      updateRun: snapshotRun()
+      updateRun: snapshotRun(),
+      updateCommand: null,
+      canApplyUpdate: true
     };
   } catch (error) {
     return {
+      installType: "git",
       repo: repoLabel(),
       repoUrl: config.updateRepoUrl,
       branch: config.updateRepoBranch,
@@ -264,9 +368,46 @@ export async function getSystemUpdateInfo(): Promise<SystemUpdateInfo> {
       commits: [],
       checkedAt,
       error: error instanceof Error ? error.message : "Could not check updates",
-      updateRun: snapshotRun()
+      updateRun: snapshotRun(),
+      updateCommand: null,
+      canApplyUpdate: false
     };
   }
+}
+
+async function runImageUpdate() {
+  const currentCommit = imageCurrentCommit();
+  if (!currentCommit) {
+    throw new Error("This Docker image was built without AEROPLANE_COMMIT_SHA, so Aeroplane cannot compare updates.");
+  }
+
+  const command = configuredImageUpdateCommand();
+  if (!command) {
+    throw new Error(`Image self-update is not configured. Update it from the VPS with: ${imageManualUpdateCommand()}`);
+  }
+
+  const gitDir = await ensureUpdateGitCache();
+  await fetchRemote(true, gitDir);
+  const targetCommit = await getRemoteCommit(gitDir);
+  activeRun.targetCommit = targetCommit;
+
+  if (currentCommit === targetCommit) {
+    appendLog("Aeroplane is already on the latest published commit.");
+    activeRun.status = "succeeded";
+    return;
+  }
+
+  const canFastForward = await isAncestor(currentCommit, targetCommit, gitDir);
+  if (!canFastForward) {
+    throw new Error("The running image commit is not an ancestor of GitHub main. Manual update required.");
+  }
+
+  const commits = await commitsBetween(currentCommit, targetCommit, gitDir);
+  appendLog(`Applying ${commits.length} commit${commits.length === 1 ? "" : "s"} up to ${shortSha(targetCommit)} by pulling the latest image.`);
+  await runLogged("sh", ["-lc", command]);
+  activeRun.restartQueued = true;
+  appendLog("Image update queued. Aeroplane will restart when Docker replaces the container.");
+  activeRun.status = "succeeded";
 }
 
 async function runUpdate() {
@@ -281,6 +422,11 @@ async function runUpdate() {
   };
 
   try {
+    if (!(await isGitCheckout())) {
+      await runImageUpdate();
+      return;
+    }
+
     const dirty = await isWorkingTreeDirty();
     if (dirty) {
       throw new Error("Cannot update while the Aeroplane working tree has local changes.");
