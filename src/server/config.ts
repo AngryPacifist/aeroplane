@@ -40,6 +40,10 @@ function applyEnvFile(filePath: string, { override = false } = {}) {
 applyEnvFile(resolve(process.cwd(), ".env"));
 applyEnvFile(resolve(process.cwd(), ".env.local"), { override: true });
 
+const defaultAeroplaneImage = process.env.AEROPLANE_IMAGE ?? "ghcr.io/akinloluwami/aeroplane:latest";
+const aeroplaneInstallDir = process.env.AEROPLANE_INSTALL_DIR ?? "/opt/aeroplane";
+const defaultImageUpdateCmd = `docker rm -f aeroplane-self-updater >/dev/null 2>&1 || true; docker run -d --name aeroplane-self-updater -v /var/run/docker.sock:/var/run/docker.sock -v ${aeroplaneInstallDir}:/work -w /work ${defaultAeroplaneImage} sh -lc 'docker compose pull aeroplane && docker compose up -d --no-deps aeroplane'`;
+
 export const config = {
   port: Number(process.env.PORT ?? 4310),
   host: process.env.HOST ?? "0.0.0.0",
@@ -62,5 +66,7 @@ export const config = {
   caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? "caddy reload --config ./data/Caddyfile",
   updateRepoUrl: process.env.AEROPLANE_UPDATE_REPO_URL ?? "https://github.com/akinloluwami/aeroplane.git",
   updateRepoBranch: process.env.AEROPLANE_UPDATE_BRANCH ?? "main",
-  updateRestartCmd: process.env.AEROPLANE_UPDATE_RESTART_CMD ?? ""
+  updateRestartCmd: process.env.AEROPLANE_UPDATE_RESTART_CMD ?? "",
+  imageCommitSha: process.env.AEROPLANE_COMMIT_SHA ?? "",
+  imageUpdateCmd: process.env.AEROPLANE_IMAGE_UPDATE_CMD ?? defaultImageUpdateCmd
 };
