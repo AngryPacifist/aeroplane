@@ -37,7 +37,7 @@ import { getSystemChecks } from "./system.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
-import { getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
+import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
 import { ensureR2Bucket } from "./r2-storage.js";
 import {
@@ -290,7 +290,7 @@ function currentRuntimeConfig() {
     caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? config.caddyReloadCmd,
     port: Number(process.env.PORT ?? config.port),
     publicUrl: process.env.PUBLIC_URL ?? config.publicUrl,
-    controlPlaneHostname: String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? ""),
+    controlPlaneHostname: configuredControlPlaneHostname(),
     hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? config.hostPortStart),
     hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? config.hostPortEnd),
     buildkitHost: process.env.BUILDKIT_HOST ?? config.buildkitHost,
@@ -777,10 +777,12 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
   }
 
   const envPath = writeManagedEnv(managedEnv);
+  config.controlPlaneHostname = input.env.controlPlaneHostname;
   updateGithubRuntimeEnv(currentGithubEnv());
   saveSystemSettings({
     ...settings,
     rootDomain: input.rootDomain === undefined ? settings.rootDomain : normalizeRootDomain(input.rootDomain),
+    controlPlaneHostname: input.env.controlPlaneHostname,
     r2
   });
   await writeAndReloadCaddy();
@@ -861,7 +863,7 @@ app.get("/api/system/settings", async (c) => {
   const rootDomain = normalizeRootDomain(settings.rootDomain);
   let dnsStatus = "pending";
   let controlPlaneDnsStatus = "pending";
-  const controlPlaneHostname = String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+  const controlPlaneHostname = configuredControlPlaneHostname(settings);
   if (rootDomain) {
     dnsStatus = await checkDomainDns(`dns-test.${rootDomain}`, cachedPublicIp);
   }
@@ -878,7 +880,7 @@ app.post("/api/system/settings", async (c) => {
   const hasControlPlaneHostname = Object.prototype.hasOwnProperty.call(body, "controlPlaneHostname");
   const rootDomain = hasRootDomain ? normalizeRootDomain(String(body.rootDomain ?? "")) : normalizeRootDomain(settings.rootDomain);
 
-  let controlPlaneHostname = String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+  let controlPlaneHostname = configuredControlPlaneHostname(settings);
   if (hasControlPlaneHostname) {
     const parsed = publicHostnameSchema.safeParse(body.controlPlaneHostname);
     if (!parsed.success) {
@@ -886,9 +888,10 @@ app.post("/api/system/settings", async (c) => {
     }
     controlPlaneHostname = parsed.data ?? "";
     writeManagedEnvPatch({ CONTROL_PLANE_HOSTNAME: controlPlaneHostname });
+    config.controlPlaneHostname = controlPlaneHostname;
   }
 
-  saveSystemSettings({ ...settings, rootDomain });
+  saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname });
   const caddy = await writeAndReloadCaddy();
   return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname }, caddy });
 });
@@ -940,8 +943,10 @@ app.post("/api/system/r2", async (c) => {
 });
 
 app.delete("/api/system/r2", (c) => {
-  saveSystemSettings({ ...getSystemSettings(), r2: null });
-  return c.json({ ok: true, r2: publicR2Settings({ rootDomain: getSystemSettings().rootDomain, r2: null }) });
+  const settings = getSystemSettings();
+  const nextSettings = { ...settings, r2: null };
+  saveSystemSettings(nextSettings);
+  return c.json({ ok: true, r2: publicR2Settings(nextSettings) });
 });
 
 app.get("/api/system/github", async (c) => {
