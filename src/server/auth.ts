@@ -41,6 +41,10 @@ function currentPublicUrl() {
   return process.env.PUBLIC_URL ?? config.publicUrl;
 }
 
+function currentControlPlaneHostname() {
+  return String(process.env.CONTROL_PLANE_HOSTNAME ?? config.controlPlaneHostname ?? "").trim().toLowerCase();
+}
+
 function passwordHash(password: string) {
   const salt = randomBytes(16).toString("base64url");
   const hash = scryptSync(password, salt, 64).toString("base64url");
@@ -160,23 +164,39 @@ function trustedOrigin(c: Context) {
   const origin = c.req.header("origin");
   if (!origin) return true;
 
-  const requestOrigin = new URL(c.req.url).origin;
-  if (origin === requestOrigin) return true;
+  const allowedOrigins = new Set<string>();
+  const requestUrl = new URL(c.req.url);
+  allowedOrigins.add(requestUrl.origin);
+
+  const forwardedHost = c.req.header("x-forwarded-host") ?? c.req.header("host");
+  const forwardedProto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || requestUrl.protocol.replace(":", "");
+  if (forwardedHost) {
+    allowedOrigins.add(`${forwardedProto}://${forwardedHost}`);
+  }
+
+  const controlPlaneHostname = currentControlPlaneHostname();
+  if (controlPlaneHostname) {
+    allowedOrigins.add(`https://${controlPlaneHostname}`);
+    allowedOrigins.add(`http://${controlPlaneHostname}`);
+  }
+
+  try {
+    allowedOrigins.add(new URL(currentPublicUrl()).origin);
+  } catch {
+    // Ignore malformed runtime PUBLIC_URL values and fall back to request headers.
+  }
+
+  if (allowedOrigins.has(origin)) return true;
 
   try {
     const originUrl = new URL(origin);
-    const requestUrl = new URL(c.req.url);
     const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
     if (localHosts.has(originUrl.hostname) && localHosts.has(requestUrl.hostname)) return true;
   } catch {
     return false;
   }
 
-  try {
-    return origin === new URL(currentPublicUrl()).origin;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function isPublicApiPath(pathname: string) {
