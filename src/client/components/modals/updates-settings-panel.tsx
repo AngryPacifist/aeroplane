@@ -35,6 +35,22 @@ function runStatusLabel(run: SystemUpdateRun) {
   return "Idle";
 }
 
+function handledRestartRunKey() {
+  try {
+    return window.sessionStorage.getItem("aeroplane:handled-update-restart") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberHandledRestartRun(runKey: string) {
+  try {
+    window.sessionStorage.setItem("aeroplane:handled-update-restart", runKey);
+  } catch {
+    // Storage can be unavailable in locked-down browsers; the in-memory guard still handles the current page.
+  }
+}
+
 export function UpdatesSettingsPanel({ open }: { open: boolean }) {
   const [info, setInfo] = useState<SystemUpdateInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,9 +95,17 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
     handledRunRef.current = runKey;
 
     if (run.status === "succeeded") {
+      const restartAlreadyHandled = handledRestartRunKey() === runKey;
       setError("");
-      setSuccess(run.restartQueued ? "Update applied. Aeroplane is restarting, then this page will refresh." : "Update built. Restart Aeroplane to load server changes.");
-      if (run.restartQueued) {
+      setSuccess(
+        run.restartQueued
+          ? restartAlreadyHandled
+            ? "Update applied. Aeroplane is restarting."
+            : "Update applied. Aeroplane is restarting, then this page will refresh."
+          : "Update built. Restart Aeroplane to load server changes."
+      );
+      if (run.restartQueued && !restartAlreadyHandled) {
+        rememberHandledRestartRun(runKey);
         window.setTimeout(() => window.location.reload(), 5000);
       }
     }
