@@ -522,8 +522,9 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
   db.insert(services).values(service).run();
 
   const systemSettings = getSystemSettings();
-  if (systemSettings.rootDomain && !isDatabaseService(service)) {
-    const defaultHostname = `${serviceSlug}.${systemSettings.rootDomain}`;
+  const rootDomain = normalizeRootDomain(systemSettings.rootDomain);
+  if (rootDomain && !isDatabaseService(service)) {
+    const defaultHostname = `${serviceSlug}.${rootDomain}`;
     db.insert(domains)
       .values({
         id: nanoid(10),
