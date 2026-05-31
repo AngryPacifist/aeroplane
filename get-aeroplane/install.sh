@@ -77,10 +77,21 @@ install_docker() {
   fi
 
   say "Installing Docker..."
-  $SUDO apt-get install -y docker.io docker-compose-plugin
+  $SUDO apt-get install -y docker.io
   if command -v systemctl >/dev/null 2>&1; then
     $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
   fi
+}
+
+install_compose_package() {
+  for package_name in docker-compose-plugin docker-compose-v2; do
+    if apt-cache show "$package_name" >/dev/null 2>&1; then
+      $SUDO apt-get install -y "$package_name"
+      return
+    fi
+  done
+
+  fail "Docker Compose v2 was not found in apt. Enable Ubuntu universe or Docker's apt repository, then rerun this installer."
 }
 
 require_compose() {
@@ -89,7 +100,7 @@ require_compose() {
   fi
 
   say "Installing Docker Compose plugin..."
-  $SUDO apt-get install -y docker-compose-plugin
+  install_compose_package
 
   $SUDO docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is still unavailable."
 }
