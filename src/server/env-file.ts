@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const envPath = resolve(process.cwd(), ".env.local");
+const envPath = resolve(process.env.AEROPLANE_ENV_PATH ?? resolve(process.cwd(), ".env.local"));
 const blockStart = "# --- Aeroplane managed settings ---";
 const blockEnd = "# --- End Aeroplane managed settings ---";
 
