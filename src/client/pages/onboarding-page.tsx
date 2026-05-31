@@ -3,6 +3,7 @@ import {
   ArrowRight02Icon,
   CheckmarkCircle02Icon,
   CloudUploadIcon,
+  DatabaseExportIcon,
   GithubIcon,
   Globe02Icon,
   Settings01Icon,
@@ -11,10 +12,10 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type AuthStatus, type OnboardingPayload } from "../api";
 import { BrandMark } from "../components/ui/brand-mark";
-import { AppIcon } from "../components/ui/primitives";
+import { AppIcon, shellButton } from "../components/ui/primitives";
 import { BackupsStep } from "../features/onboarding/backups-step";
 import { GitHubStep } from "../features/onboarding/github-step";
-import { MigrationImportPanel } from "../features/onboarding/migration-import-panel";
+import { MigrationImportModal } from "../features/onboarding/migration-import-modal";
 import { OnboardingThread } from "../features/onboarding/onboarding-thread";
 import { OwnerStep } from "../features/onboarding/owner-step";
 import { RootDomainStep } from "../features/onboarding/root-domain-step";
@@ -94,6 +95,7 @@ export function OnboardingPage() {
   const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [migrationImportOpen, setMigrationImportOpen] = useState(false);
   const [error, setError] = useState("");
   usePageTitle("Onboarding");
 
@@ -226,8 +228,6 @@ export function OnboardingPage() {
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Step {step + 1} of {activeSteps.length}</div>
         </header>
 
-        {!restartMode ? <MigrationImportPanel /> : null}
-
         <OnboardingThread steps={activeSteps} activeStep={step} onStepChange={setStep} />
 
         <form onSubmit={submit} className="space-y-5">
@@ -262,7 +262,17 @@ export function OnboardingPage() {
             </button>
           </div>
         </form>
+
+        {!restartMode ? (
+          <div className="flex justify-center border-t border-zinc-800 pt-5">
+            <button type="button" className={shellButton("secondary")} onClick={() => setMigrationImportOpen(true)}>
+              <AppIcon icon={DatabaseExportIcon} size={14} />
+              Import existing Aeroplane
+            </button>
+          </div>
+        ) : null}
       </div>
+      <MigrationImportModal open={migrationImportOpen} onClose={() => setMigrationImportOpen(false)} />
     </main>
   );
 }
