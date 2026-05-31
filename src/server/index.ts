@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { nanoid } from "nanoid";
@@ -10,8 +10,10 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import dns from "node:dns/promises";
 import { networkInterfaces } from "node:os";
-import { readFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { createReadStream, readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
+import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
@@ -30,6 +32,7 @@ import {
   envVars,
   projectGroups,
   services,
+  users,
   type ProjectGroup,
   type Service
 } from "./schema.js";
@@ -70,6 +73,7 @@ import {
   updateDatabaseRow,
   type DatabaseRowFilter
 } from "./database-console.js";
+import { createMigrationBundle, importMigrationBundle } from "./migration-bundle.js";
 
 const app = new Hono();
 
@@ -162,6 +166,9 @@ const databaseDeleteSchema = z.object({
 });
 const backupCreateSchema = z.object({
   storage: z.enum(["disk", "disk+r2"]).default("disk")
+});
+const migrationExportSchema = z.object({
+  passphrase: z.string().min(8, "Use a migration passphrase with at least 8 characters.")
 });
 const maintenanceCleanupSchema = z.object({
   targets: z.array(z.enum(maintenanceCleanupTargets)).min(1).max(maintenanceCleanupTargets.length)
@@ -643,6 +650,44 @@ function publicAuthStatus(c: Parameters<typeof getCurrentUser>[0]) {
   };
 }
 
+type UploadedMigrationFile = {
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  name?: string;
+  size?: number;
+};
+
+function isUploadedMigrationFile(value: unknown): value is UploadedMigrationFile {
+  const candidate = value as Partial<UploadedMigrationFile> | null;
+  return Boolean(candidate && typeof candidate === "object" && typeof candidate.arrayBuffer === "function");
+}
+
+async function saveUploadedMigrationBundle(c: Context) {
+  const form = await c.req.formData();
+  const passphrase = String(form.get("passphrase") ?? "");
+  const bundle = form.get("bundle");
+  if (!passphrase || passphrase.length < 8) {
+    throw new Error("Use the migration passphrase from the source VPS.");
+  }
+  if (!isUploadedMigrationFile(bundle)) {
+    throw new Error("Choose an Aeroplane migration bundle.");
+  }
+
+  const uploadDir = mkdtempSync(join(tmpdir(), "aeroplane-upload-"));
+  const uploadPath = join(uploadDir, "bundle.aeroplane");
+  writeFileSync(uploadPath, Buffer.from(await bundle.arrayBuffer()));
+  return { passphrase, uploadDir, uploadPath };
+}
+
+function queueImportedAppDeployments() {
+  const importedServices = db.select().from(services).all();
+  const queued = [];
+  for (const service of importedServices) {
+    if (isDatabaseService(service) || service.staticOutput || service.status !== "active") continue;
+    queued.push(enqueueDeployment(service.id, { trigger: "manual" }));
+  }
+  return queued;
+}
+
 function currentGithubEnv() {
   return {
     githubAccessToken: process.env.GITHUB_ACCESS_TOKEN ?? config.githubAccessToken,
@@ -802,6 +847,34 @@ app.post("/api/auth/setup", async (c) => {
   return c.json({ ok: true, user: publicUser(user), envPath, restartRequired: true }, 201);
 });
 
+app.post("/api/auth/migration/import", async (c) => {
+  if (hasAuthUsers()) {
+    return jsonError("Aeroplane has already been set up", 409);
+  }
+
+  let upload: { passphrase: string; uploadDir: string; uploadPath: string } | null = null;
+  try {
+    upload = await saveUploadedMigrationBundle(c);
+    const result = await importMigrationBundle(upload.uploadPath, upload.passphrase);
+    const owner = db.select().from(users).orderBy(asc(users.createdAt)).limit(1).get();
+    if (owner) {
+      createSession(c, owner);
+    }
+    const queuedDeployments = queueImportedAppDeployments();
+    return c.json({
+      ok: true,
+      result,
+      user: owner ? publicUser(owner) : null,
+      queuedDeployments: queuedDeployments.map((deployment) => deployment.id),
+      restartRequired: true
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not import migration bundle", 400);
+  } finally {
+    if (upload) rmSync(upload.uploadDir, { recursive: true, force: true });
+  }
+});
+
 app.post("/api/auth/login", async (c) => {
   if (!hasAuthUsers()) {
     return jsonError("Setup required", 401);
@@ -855,6 +928,31 @@ app.post("/api/system/maintenance/cleanup", async (c) => {
   }
 
   return c.json(await runSystemMaintenanceCleanup(body.data.targets));
+});
+
+app.post("/api/system/migration/export", async (c) => {
+  const body = migrationExportSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid migration request");
+  }
+
+  try {
+    const bundle = await createMigrationBundle(body.data.passphrase);
+    const nodeStream = createReadStream(bundle.bundlePath);
+    nodeStream.on("close", () => {
+      rmSync(bundle.workDir, { recursive: true, force: true });
+    });
+    return new Response(Readable.toWeb(nodeStream) as ReadableStream, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${bundle.fileName}"`,
+        "Content-Length": String(bundle.sizeBytes),
+        "Cache-Control": "no-store"
+      }
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not create migration bundle", 400);
+  }
 });
 
 app.get("/api/system/settings", async (c) => {
