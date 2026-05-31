@@ -134,7 +134,14 @@ export function ControlPlaneDomainSettingsPanel({ open }: { open: boolean }) {
           </div>
           <div>
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Dashboard domain</div>
-            <h3 className="mt-1 font-hero text-xl tracking-tight text-zinc-100">{hasSavedHostname ? savedHostname : "No dashboard domain"}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h3 className="font-hero text-xl tracking-tight text-zinc-100">{hasSavedHostname ? savedHostname : "No dashboard domain"}</h3>
+              {hasSavedHostname ? (
+                <span className={`px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${statusClass(dnsStatus)}`}>
+                  {dnsStatus === "active" ? "DNS active" : "DNS pending"}
+                </span>
+              ) : null}
+            </div>
             <p className="mt-2 text-sm leading-relaxed text-zinc-400">
               Point a hostname at this VPS and Aeroplane will serve the dashboard through Caddy with HTTPS.
             </p>
@@ -143,9 +150,6 @@ export function ControlPlaneDomainSettingsPanel({ open }: { open: boolean }) {
 
         {hasSavedHostname && !editing ? (
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${statusClass(dnsStatus)}`}>
-              {dnsStatus === "active" ? "DNS active" : "DNS pending"}
-            </span>
             <button
               type="button"
               className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-[#4FB8B2]/45 hover:bg-[#4FB8B2]/10 hover:text-[#7fe3dd]"
