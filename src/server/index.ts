@@ -34,6 +34,7 @@ import {
   type Service
 } from "./schema.js";
 import { getSystemChecks } from "./system.js";
+import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenanceCleanup } from "./system-maintenance.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
@@ -159,6 +160,9 @@ const databaseDeleteSchema = z.object({
 });
 const backupCreateSchema = z.object({
   storage: z.enum(["disk", "disk+r2"]).default("disk")
+});
+const maintenanceCleanupSchema = z.object({
+  targets: z.array(z.enum(maintenanceCleanupTargets)).min(1).max(maintenanceCleanupTargets.length)
 });
 const r2ConnectionSchema = z.object({
   accountId: z.string().trim().min(1).transform((value) => value.toLowerCase()),
@@ -858,6 +862,17 @@ app.post("/api/system/onboarding/restart", async (c) => {
 });
 
 app.get("/api/system", async (c) => c.json(await getSystemChecks()));
+
+app.get("/api/system/maintenance", async (c) => c.json(await getSystemMaintenanceInfo()));
+
+app.post("/api/system/maintenance/cleanup", async (c) => {
+  const body = maintenanceCleanupSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid cleanup request");
+  }
+
+  return c.json(await runSystemMaintenanceCleanup(body.data.targets));
+});
 
 app.get("/api/system/settings", async (c) => {
   const settings = getSystemSettings();
