@@ -221,15 +221,17 @@ export function RootDomainSettingsPanel({ open }: { open: boolean }) {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Wildcard root domain</div>
-                <h3 className="mt-2 font-hero text-2xl tracking-tight text-zinc-100">{wildcardRootDomain(savedRootDomain)}</h3>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <h3 className="font-hero text-2xl tracking-tight text-zinc-100">{wildcardRootDomain(savedRootDomain)}</h3>
+                  <span className={`px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${statusClass(dnsStatus)}`}>
+                    {dnsStatus === "active" ? "DNS active" : "DNS pending"}
+                  </span>
+                </div>
                 <p className="mt-2 text-sm leading-relaxed text-zinc-400">
                   New services will get default URLs like <span className="text-[#4FB8B2]">api.{savedRootDomain}</span>.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] ${statusClass(dnsStatus)}`}>
-                  {dnsStatus === "active" ? "DNS active" : "DNS pending"}
-                </span>
                 <button
                   type="button"
                   className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-[#4FB8B2]/45 hover:bg-[#4FB8B2]/10 hover:text-[#7fe3dd] disabled:opacity-55"
