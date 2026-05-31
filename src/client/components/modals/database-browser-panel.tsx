@@ -1,9 +1,10 @@
-import { Add01Icon, Refresh03Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, DatabaseImportIcon, MoreVerticalIcon, Refresh03Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type DatabaseColumn, type DatabaseRow, type DatabaseRowFilter, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
 import { Dropdown } from "../ui/dropdown";
 import { AppIcon, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet, validRedisType } from "./database-insert-sheet";
+import { PostgresDataImportModal } from "./postgres-data-import-modal";
 import { DatabaseTableGrid } from "./database-table-grid";
 import { MongoDocumentList } from "./mongo-document-list";
 import { MongoDocumentModal } from "./mongo-document-modal";
@@ -58,6 +59,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const [selectedSchema, setSelectedSchema] = useState("");
   const [engine, setEngine] = useState("");
   const [mongoQuery, setMongoQuery] = useState("");
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const columns = rowsResult?.columns ?? [];
   const rows = rowsResult?.rows ?? [];
@@ -65,6 +68,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const nouns = browserNouns(rowsResult?.engine ?? engine);
   const isRedis = engine === "redis";
   const isMongo = engine === "mongodb" || engine === "mongo";
+  const canImportData = engine === "postgres";
   const canAddDocument = isRedis || isMongo;
 
   const selectedTableName = useMemo(() => {
@@ -197,6 +201,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setRowsResult(null);
     setAppliedFilters([]);
     setMongoQuery("");
+    setOptionsOpen(false);
+    setImportOpen(false);
     setPageOffset(0);
     void loadTables();
   }, [serviceId]);
@@ -225,6 +231,15 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setAppliedFilters([]);
     setPageOffset(0);
     void loadRows(selectedTable, [], 0, pageSize);
+  }
+
+  async function refreshAfterImport() {
+    setSelectedTable("");
+    setRowsResult(null);
+    setAppliedFilters([]);
+    setMongoQuery("");
+    setPageOffset(0);
+    await loadTables();
   }
 
   function beginEdit(index: number) {
@@ -418,6 +433,33 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
               <AppIcon icon={Refresh03Icon} size={15} className={busy === "rows" ? "animate-spin" : ""} />
               Refresh
             </button>
+            {canImportData ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-9 items-center justify-center border border-zinc-800 bg-zinc-900/70 text-zinc-300 transition hover:border-zinc-600 hover:text-zinc-100"
+                  onClick={() => setOptionsOpen((current) => !current)}
+                  aria-label="Data options"
+                >
+                  <AppIcon icon={MoreVerticalIcon} size={17} />
+                </button>
+                {optionsOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-20 w-52 border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2 px-3 py-3 text-left font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-200 transition hover:bg-zinc-800 hover:text-white"
+                      onClick={() => {
+                        setOptionsOpen(false);
+                        setImportOpen(true);
+                      }}
+                    >
+                      <AppIcon icon={DatabaseImportIcon} size={15} />
+                      Import data
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -538,6 +580,12 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
             }}
           />
         ) : null}
+        <PostgresDataImportModal
+          open={importOpen}
+          serviceId={serviceId}
+          onClose={() => setImportOpen(false)}
+          onImported={refreshAfterImport}
+        />
       </section>
     </div>
   );
