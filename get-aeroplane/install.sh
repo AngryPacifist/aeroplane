@@ -305,6 +305,7 @@ print_firewall_hint() {
     say "  sudo ufw allow 80/tcp"
     say "  sudo ufw allow 443/tcp"
     say "  sudo ufw allow $PORT/tcp"
+    say "  sudo ufw allow $HOST_PORT_START:$HOST_PORT_END/tcp"
   fi
 }
 
