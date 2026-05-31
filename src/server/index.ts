@@ -200,8 +200,6 @@ const setupSchema = z.object({
     port: z.coerce.number().int().min(1).max(65535).default(4310),
     publicUrl: z.string().trim().min(1).default("http://localhost:5173"),
     controlPlaneHostname: publicHostnameSchema,
-    hostPortStart: z.coerce.number().int().min(1).max(65535).default(4100),
-    hostPortEnd: z.coerce.number().int().min(1).max(65535).default(4999),
     buildkitHost: z.string().trim().min(1).default("tcp://127.0.0.1:1234"),
     runtimeNetworkName: z.string().trim().min(1).default("aeroplane-runtime"),
     githubAccessToken: optionalString,
@@ -293,8 +291,6 @@ function currentRuntimeConfig() {
     port: Number(process.env.PORT ?? config.port),
     publicUrl: process.env.PUBLIC_URL ?? config.publicUrl,
     controlPlaneHostname: configuredControlPlaneHostname(),
-    hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? config.hostPortStart),
-    hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? config.hostPortEnd),
     buildkitHost: process.env.BUILDKIT_HOST ?? config.buildkitHost,
     runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? config.runtimeNetworkName
   };
@@ -404,7 +400,8 @@ function urlForHostname(hostname: string) {
 
 async function publicService(service: Service) {
   const isDatabase = isDatabaseService(service);
-  const localUrl = isDatabase ? "" : `http://127.0.0.1:${service.hostPort}`;
+  const appPort = service.activePort ?? service.hostPort;
+  const localUrl = isDatabase ? "" : `http://127.0.0.1:${appPort}`;
   const latestDeployment = db
     .select({ status: deployments.status })
     .from(deployments)
@@ -413,7 +410,7 @@ async function publicService(service: Service) {
     .limit(1)
     .get();
   const shouldProbe = service.status === "active" || service.status === "building";
-  const reachable = shouldProbe ? await checkPortReachable(service.hostPort) : false;
+  const reachable = shouldProbe ? await checkPortReachable(appPort) : false;
   const latestDeploymentIsActive = latestDeployment?.status === "queued" || latestDeployment?.status === "building";
   const liveStatus = service.status === "active" && !reachable && !latestDeploymentIsActive ? "crashed" : service.status;
   const serviceDomains = isDatabase ? [] : db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
@@ -720,8 +717,6 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
     PORT: input.env.port,
     PUBLIC_URL: input.env.publicUrl,
     CONTROL_PLANE_HOSTNAME: input.env.controlPlaneHostname,
-    DEPLOY_HOST_PORT_START: input.env.hostPortStart,
-    DEPLOY_HOST_PORT_END: input.env.hostPortEnd,
     BUILDKIT_HOST: input.env.buildkitHost,
     AEROPLANE_RUNTIME_NETWORK: input.env.runtimeNetworkName,
     GITHUB_ACCESS_TOKEN: input.env.githubAccessToken ?? process.env.GITHUB_ACCESS_TOKEN,
