@@ -207,7 +207,7 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
         </section>
       ) : null}
 
-      {info?.status === "current" ? (
+      {info?.status === "current" && !updateRunning ? (
         <section className="flex min-h-[220px] items-center justify-center border border-zinc-800 bg-zinc-950/45 p-8 text-center">
           <div>
             <div className="mx-auto grid h-12 w-12 place-items-center border border-emerald-500/35 bg-emerald-500/10 text-emerald-300">
