@@ -14,6 +14,13 @@ function generatedHostnamePattern(serviceSlug: string, rootDomain: string) {
   return new RegExp(`^${escapeRegex(serviceSlug)}(?:-\\d+)?\\.${escapeRegex(rootDomain)}$`);
 }
 
+export function isGeneratedServiceHostname(serviceSlug: string, hostname: string, rootDomainInput = getSystemSettings().rootDomain) {
+  const rootDomain = normalizeRootDomain(rootDomainInput);
+  if (!rootDomain) return false;
+
+  return generatedHostnamePattern(serviceSlug, rootDomain).test(hostname);
+}
+
 function hostnameExists(hostname: string) {
   return Boolean(db.select({ id: domains.id }).from(domains).where(eq(domains.hostname, hostname)).get());
 }
@@ -34,9 +41,8 @@ export function ensureDefaultDomainForService(service: Service, rootDomainInput 
   const rootDomain = normalizeRootDomain(rootDomainInput);
   if (!rootDomain || isDatabaseService(service)) return null;
 
-  const generatedPattern = generatedHostnamePattern(service.slug, rootDomain);
   const existingServiceDomains = db.select().from(domains).where(eq(domains.serviceId, service.id)).all();
-  const existingGeneratedDomain = existingServiceDomains.find((domain) => generatedPattern.test(domain.hostname));
+  const existingGeneratedDomain = existingServiceDomains.find((domain) => isGeneratedServiceHostname(service.slug, domain.hostname, rootDomain));
   if (existingGeneratedDomain) return existingGeneratedDomain;
 
   const timestamp = nowIso();
