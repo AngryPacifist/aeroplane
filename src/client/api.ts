@@ -360,6 +360,22 @@ export type SystemMaintenanceCleanupResult = {
   info: SystemMaintenanceInfo;
 };
 
+export type MigrationImportResult = {
+  importedAt: string;
+  projects: number;
+  services: number;
+  users: number;
+  restoredDatabases: number;
+  databaseDumps: Array<{
+    serviceId: string;
+    engine: string;
+    format: string;
+    path: string;
+    sizeBytes: number;
+    checksum: string;
+  }>;
+};
+
 export type ServiceOverview = {
   service: Service;
   deployments: Deployment[];
@@ -424,6 +440,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return payload as T;
+}
+
+async function requestJsonError(response: Response, fallback: string) {
+  const payload = await response.json().catch(() => ({}));
+  return new Error((payload as { error?: string }).error ?? fallback);
+}
+
+function downloadFile(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export const api = {
@@ -574,6 +606,42 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ targets })
     }),
+  exportMigrationBundle: async (passphrase: string) => {
+    const response = await fetch("/api/system/migration/export", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase })
+    });
+    if (!response.ok) throw await requestJsonError(response, "Could not export migration bundle");
+
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? "aeroplane-export.aeroplane";
+    downloadFile(blob, fileName);
+    return { fileName, sizeBytes: blob.size };
+  },
+  importMigrationBundle: async (bundle: File, passphrase: string) => {
+    const form = new FormData();
+    form.set("bundle", bundle);
+    form.set("passphrase", passphrase);
+    const response = await fetch("/api/auth/migration/import", {
+      method: "POST",
+      credentials: "same-origin",
+      body: form
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error((payload as { error?: string }).error ?? "Could not import migration bundle");
+    }
+    return payload as {
+      ok: boolean;
+      result: MigrationImportResult;
+      user: AuthUser | null;
+      queuedDeployments: string[];
+      restartRequired: boolean;
+    };
+  },
   databaseBackups: (serviceId: string) =>
     request<{ backups: DatabaseBackup[]; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
   createDatabaseBackup: (serviceId: string, storage: "disk" | "disk+r2") =>
