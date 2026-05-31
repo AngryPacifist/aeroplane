@@ -11,8 +11,6 @@ export type OnboardingForm = {
   port: string;
   publicUrl: string;
   controlPlaneHostname: string;
-  hostPortStart: string;
-  hostPortEnd: string;
   buildkitHost: string;
   runtimeNetworkName: string;
   githubAccessToken: string;
@@ -42,8 +40,6 @@ export const defaultOnboardingForm: OnboardingForm = {
   port: "4310",
   publicUrl: "http://localhost:5173",
   controlPlaneHostname: "",
-  hostPortStart: "4100",
-  hostPortEnd: "4999",
   buildkitHost: "tcp://127.0.0.1:1234",
   runtimeNetworkName: "aeroplane-runtime",
   githubAccessToken: "",
