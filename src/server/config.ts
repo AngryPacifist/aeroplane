@@ -61,8 +61,6 @@ export const config = {
   githubAppPrivateKey: (process.env.GITHUB_APP_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
   githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? "",
   buildkitHost: process.env.BUILDKIT_HOST ?? "tcp://127.0.0.1:1234",
-  hostPortStart: Number(process.env.DEPLOY_HOST_PORT_START ?? 4100),
-  hostPortEnd: Number(process.env.DEPLOY_HOST_PORT_END ?? 4999),
   runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? "aeroplane-runtime",
   secretKey: process.env.AEROPLANE_SECRET_KEY ?? "",
   caddyConfigPath: resolve(process.env.CADDY_CONFIG_PATH ?? "data/Caddyfile"),
