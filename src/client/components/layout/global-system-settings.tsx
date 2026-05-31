@@ -19,8 +19,9 @@ export function GlobalSystemSettings() {
 
   function updateSettingsTab(tab?: SystemSettingsTab) {
     void navigate({
+      to: location.pathname,
       search: (current) => {
-        const next = { ...(current as Record<string, unknown>) };
+        const next = { ...current };
         if (tab) {
           next.settings = tab;
         } else {
