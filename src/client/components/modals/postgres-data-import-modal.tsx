@@ -25,6 +25,13 @@ function metadataText(source: ServiceImportSource, key: string) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function nextProgressValue(current: number) {
+  if (current < 20) return current + 4;
+  if (current < 55) return current + 2;
+  if (current < 80) return current + 1;
+  return current + 0.35;
+}
+
 export function PostgresDataImportModal({
   open,
   serviceId,
@@ -42,6 +49,7 @@ export function PostgresDataImportModal({
   const [railwayToken, setRailwayToken] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [phase, setPhase] = useState<ImportPhase>("form");
+  const [progressPercent, setProgressPercent] = useState(0);
   const [loadingSources, setLoadingSources] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -72,13 +80,34 @@ export function PostgresDataImportModal({
     setSourceUrl("");
     setConfirmed(false);
     setPhase("form");
+    setProgressPercent(0);
     setRailwayToken(localStorage.getItem("railway_api_token") ?? "");
     void loadSources();
   }, [open, serviceId]);
 
+  useEffect(() => {
+    if (phase !== "progress") return;
+    if (result) {
+      setProgressPercent(100);
+      return;
+    }
+    if (error) {
+      setProgressPercent((current) => Math.max(current, 12));
+      return;
+    }
+    if (!busy) return;
+
+    const interval = window.setInterval(() => {
+      setProgressPercent((current) => Math.min(94, nextProgressValue(current)));
+    }, 550);
+
+    return () => window.clearInterval(interval);
+  }, [busy, error, phase, result]);
+
   function closeModal() {
     if (busy) return;
     setPhase("form");
+    setProgressPercent(0);
     onClose();
   }
 
@@ -88,6 +117,7 @@ export function PostgresDataImportModal({
 
     setBusy(true);
     setPhase("progress");
+    setProgressPercent(7);
     setError("");
     setResult(null);
     try {
@@ -128,7 +158,10 @@ export function PostgresDataImportModal({
               </span>
             </div>
             <div className="mt-5 h-2 overflow-hidden border border-zinc-800 bg-zinc-950">
-              <div className={`h-full bg-[#4FB8B2] transition-all duration-500 ${result ? "w-full" : error ? "w-1/3 bg-rose-400" : "w-2/3"}`} />
+              <div
+                className={`h-full transition-[width,background-color] duration-500 ${error ? "bg-rose-400" : "bg-[#4FB8B2]"}`}
+                style={{ width: `${progressPercent}%` }}
+              />
             </div>
             <p className="mt-4 text-sm leading-6 text-zinc-400">
               {result
@@ -155,6 +188,7 @@ export function PostgresDataImportModal({
                 className={shellButton("ghost")}
                 onClick={() => {
                   setError("");
+                  setProgressPercent(0);
                   setPhase("form");
                 }}
               >
