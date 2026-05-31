@@ -40,7 +40,7 @@ import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
-import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices } from "./service-domains.js";
+import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices, isGeneratedServiceHostname } from "./service-domains.js";
 import { normalizeRootDomain } from "./root-domain.js";
 import { ensureR2Bucket } from "./r2-storage.js";
 import {
@@ -414,7 +414,10 @@ async function publicService(service: Service) {
   const latestDeploymentIsActive = latestDeployment?.status === "queued" || latestDeployment?.status === "building";
   const liveStatus = service.status === "active" && !reachable && !latestDeploymentIsActive ? "crashed" : service.status;
   const serviceDomains = isDatabase ? [] : db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
+  const customDomains = serviceDomains.filter((domain) => !isGeneratedServiceHostname(service.slug, domain.hostname));
   const preferredDomain =
+    customDomains.find((domain) => domain.status === "active") ??
+    customDomains.find((domain) => Boolean(domain.hostname)) ??
     serviceDomains.find((domain) => domain.status === "active") ??
     serviceDomains.find((domain) => Boolean(domain.hostname));
   const primaryUrl = isDatabase ? "" : preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
