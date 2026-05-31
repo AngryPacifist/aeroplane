@@ -40,6 +40,8 @@ import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
+import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices } from "./service-domains.js";
+import { normalizeRootDomain } from "./root-domain.js";
 import { ensureR2Bucket } from "./r2-storage.js";
 import {
   authenticateUser,
@@ -269,10 +271,6 @@ const searchSchema = z.object({
 
 function jsonError(message: string, status = 400) {
   return Response.json({ error: message }, { status });
-}
-
-function normalizeRootDomain(value: string | undefined) {
-  return (value ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").replace(/\.+$/, "").replace(/^\*\./, "");
 }
 
 function normalizeEnvValue(value: string) {
@@ -521,21 +519,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
 
   db.insert(services).values(service).run();
 
-  const systemSettings = getSystemSettings();
-  const rootDomain = normalizeRootDomain(systemSettings.rootDomain);
-  if (rootDomain && !isDatabaseService(service)) {
-    const defaultHostname = `${serviceSlug}.${rootDomain}`;
-    db.insert(domains)
-      .values({
-        id: nanoid(10),
-        serviceId: service.id,
-        hostname: defaultHostname,
-        status: "pending",
-        createdAt: timestamp,
-        updatedAt: timestamp
-      })
-      .run();
-  }
+  ensureDefaultDomainForService(service);
   if (input.env.length > 0) {
     const timestamp = nowIso();
     const uniqueEnv = new Map<string, string>();
@@ -909,6 +893,9 @@ app.post("/api/system/settings", async (c) => {
   }
 
   saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname });
+  if (rootDomain) {
+    ensureDefaultDomainsForExistingServices(rootDomain);
+  }
   const caddy = await writeAndReloadCaddy();
   return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname }, caddy });
 });
@@ -1906,6 +1893,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 syncAllExistingDatabaseUrls();
+ensureDefaultDomainsForExistingServices();
 void writeAndReloadCaddy().catch((error) => {
   console.error("Failed to write Caddy config on startup:", error);
 });
