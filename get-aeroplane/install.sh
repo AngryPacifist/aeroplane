@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+cd /
+
 INSTALL_DIR="${AEROPLANE_HOME:-/opt/aeroplane}"
 APP_DIR="$INSTALL_DIR/source"
 REPO_URL="${AEROPLANE_REPO_URL:-https://github.com/akinloluwami/aeroplane.git}"
@@ -196,6 +198,11 @@ clone_or_update_repo() {
     git -C "$APP_DIR" checkout "$REPO_BRANCH"
     git -C "$APP_DIR" pull --ff-only origin "$REPO_BRANCH"
     return
+  fi
+
+  if [ -d "$APP_DIR" ] && [ -z "$(ls -A "$APP_DIR" 2>/dev/null)" ]; then
+    say "Removing empty source directory from a previous interrupted install..."
+    rmdir "$APP_DIR"
   fi
 
   if [ -e "$APP_DIR" ]; then
