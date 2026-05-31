@@ -194,6 +194,13 @@ EOF
 clone_or_update_repo() {
   if [ -d "$APP_DIR/.git" ]; then
     say "Updating Aeroplane source..."
+    status="$(git -C "$APP_DIR" status --porcelain --untracked-files=no)"
+    case "$status" in
+      " M package-lock.json"|"M  package-lock.json"|"MM package-lock.json")
+        say "Cleaning package-lock.json drift from dependency pruning..."
+        git -C "$APP_DIR" checkout -- package-lock.json
+        ;;
+    esac
     git -C "$APP_DIR" fetch origin "$REPO_BRANCH"
     git -C "$APP_DIR" checkout "$REPO_BRANCH"
     git -C "$APP_DIR" pull --ff-only origin "$REPO_BRANCH"
@@ -220,7 +227,7 @@ build_aeroplane() {
 
   say "Building Aeroplane..."
   npm run build
-  npm prune --omit=dev
+  npm prune --omit=dev --package-lock=false
 }
 
 write_compose_file() {
