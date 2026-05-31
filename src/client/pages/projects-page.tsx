@@ -78,8 +78,9 @@ export function ProjectsPage() {
 
   function openSystemSettings(tab: SystemSettingsTab = "root-domain") {
     void navigate({
+      to: "/",
       search: (current) => ({
-        ...(current as Record<string, unknown>),
+        ...current,
         settings: tab
       })
     });
