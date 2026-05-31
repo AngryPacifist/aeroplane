@@ -295,6 +295,75 @@ export type SystemUpdateInfo = {
   canApplyUpdate: boolean;
 };
 
+export type MaintenanceCleanupTarget =
+  | "docker-containers"
+  | "docker-images"
+  | "docker-build-cache"
+  | "docker-volumes"
+  | "apt-cache"
+  | "journals"
+  | "build-artifacts";
+
+export type MaintenanceCommandResult = {
+  label: string;
+  ok: boolean;
+  output: string;
+};
+
+export type MaintenanceDiskMetric = {
+  mount: string;
+  totalBytes: number;
+  usedBytes: number;
+  availableBytes: number;
+  usedPercent: number;
+};
+
+export type MaintenancePathMetric = {
+  id: string;
+  label: string;
+  path: string;
+  bytes: number | null;
+  available: boolean;
+  error: string | null;
+};
+
+export type MaintenanceDockerMetric = {
+  type: string;
+  totalCount: number | null;
+  activeCount: number | null;
+  sizeBytes: number | null;
+  reclaimableBytes: number | null;
+  rawSize: string;
+  rawReclaimable: string;
+};
+
+export type MaintenanceHistoryPoint = {
+  checkedAt: string;
+  diskUsedPercent: number | null;
+  dockerReclaimableBytes: number | null;
+  buildArtifactsBytes: number | null;
+};
+
+export type SystemMaintenanceInfo = {
+  checkedAt: string;
+  disk: MaintenanceDiskMetric | null;
+  docker: {
+    available: boolean;
+    error: string | null;
+    rows: MaintenanceDockerMetric[];
+    reclaimableBytes: number;
+  };
+  paths: MaintenancePathMetric[];
+  history: MaintenanceHistoryPoint[];
+  alerts: string[];
+};
+
+export type SystemMaintenanceCleanupResult = {
+  ok: boolean;
+  commands: MaintenanceCommandResult[];
+  info: SystemMaintenanceInfo;
+};
+
 export type ServiceOverview = {
   service: Service;
   deployments: Deployment[];
@@ -502,6 +571,12 @@ export const api = {
   applySystemUpdate: () =>
     request<{ ok: boolean; updateRun: SystemUpdateRun }>("/api/system/updates/apply", {
       method: "POST"
+    }),
+  systemMaintenance: () => request<SystemMaintenanceInfo>("/api/system/maintenance"),
+  runSystemMaintenanceCleanup: (targets: MaintenanceCleanupTarget[]) =>
+    request<SystemMaintenanceCleanupResult>("/api/system/maintenance/cleanup", {
+      method: "POST",
+      body: JSON.stringify({ targets })
     }),
   databaseBackups: (serviceId: string) =>
     request<{ backups: DatabaseBackup[]; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
