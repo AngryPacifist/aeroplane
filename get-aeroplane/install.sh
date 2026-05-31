@@ -2,7 +2,9 @@
 set -eu
 
 INSTALL_DIR="${AEROPLANE_HOME:-/opt/aeroplane}"
-IMAGE="${AEROPLANE_IMAGE:-ghcr.io/akinloluwami/aeroplane:latest}"
+APP_DIR="$INSTALL_DIR/source"
+REPO_URL="${AEROPLANE_REPO_URL:-https://github.com/akinloluwami/aeroplane.git}"
+REPO_BRANCH="${AEROPLANE_REPO_BRANCH:-main}"
 PORT="${AEROPLANE_PORT:-4310}"
 HOST_PORT_START="${AEROPLANE_HOST_PORT_START:-4100}"
 HOST_PORT_END="${AEROPLANE_HOST_PORT_END:-4999}"
@@ -41,16 +43,41 @@ require_linux() {
   fi
 }
 
-install_docker() {
-  if command -v docker >/dev/null 2>&1; then
+require_apt() {
+  command -v apt-get >/dev/null 2>&1 || fail "apt-get was not found. The installer currently supports Ubuntu/Debian hosts."
+}
+
+install_base_packages() {
+  require_apt
+  say "Installing base packages..."
+  $SUDO apt-get update
+  $SUDO apt-get install -y ca-certificates curl git openssl build-essential python3
+}
+
+node_major_version() {
+  node -p "process.versions.node.split('.')[0]" 2>/dev/null || printf '0\n'
+}
+
+install_node() {
+  if command -v node >/dev/null 2>&1 && [ "$(node_major_version)" -ge 22 ]; then
     return
   fi
 
-  command -v apt-get >/dev/null 2>&1 || fail "Docker is not installed and apt-get was not found."
+  say "Installing Node.js 22..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash -
+  $SUDO apt-get install -y nodejs
+}
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1; then
+      $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+    fi
+    return
+  fi
 
   say "Installing Docker..."
-  $SUDO apt-get update
-  $SUDO apt-get install -y ca-certificates curl docker.io docker-compose-plugin
+  $SUDO apt-get install -y docker.io docker-compose-plugin
   if command -v systemctl >/dev/null 2>&1; then
     $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
   fi
@@ -61,12 +88,19 @@ require_compose() {
     return
   fi
 
-  command -v apt-get >/dev/null 2>&1 || fail "Docker Compose plugin is not installed."
   say "Installing Docker Compose plugin..."
-  $SUDO apt-get update
   $SUDO apt-get install -y docker-compose-plugin
 
   $SUDO docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is still unavailable."
+}
+
+install_railpack() {
+  if command -v railpack >/dev/null 2>&1; then
+    return
+  fi
+
+  say "Installing Railpack..."
+  curl -fsSL https://railpack.com/install.sh | $SUDO sh -s -- --bin-dir /usr/local/bin
 }
 
 random_secret() {
@@ -97,23 +131,47 @@ detect_public_url() {
   printf 'http://%s:%s\n' "$public_ip" "$PORT"
 }
 
+get_env_value() {
+  env_file="$1"
+  key="$2"
+  [ -f "$env_file" ] || return 0
+  value="$(grep "^$key=" "$env_file" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
+  printf '%s' "$value" | sed "s/^[\"']//;s/[\"']$//"
+}
+
 write_env_file() {
   env_file="$INSTALL_DIR/.env"
-  if [ -f "$env_file" ]; then
-    say "Keeping existing $env_file"
-    return
+  secret_key="$(get_env_value "$env_file" AEROPLANE_SECRET_KEY)"
+  public_url="$(get_env_value "$env_file" PUBLIC_URL)"
+  control_plane_hostname="$(get_env_value "$env_file" CONTROL_PLANE_HOSTNAME)"
+
+  if [ -z "$secret_key" ]; then
+    secret_key="$(random_secret)"
+  fi
+  if [ -z "$public_url" ]; then
+    public_url="$(detect_public_url)"
   fi
 
-  secret_key="$(random_secret)"
-  public_url="$(detect_public_url)"
+  tmp_file="$(mktemp)"
+  if [ -f "$env_file" ]; then
+    grep -v -E '^(AEROPLANE_INSTALL_MODE|AEROPLANE_INSTALL_DIR|AEROPLANE_ENV_PATH|AEROPLANE_REPO_URL|AEROPLANE_REPO_BRANCH|AEROPLANE_IMAGE|AEROPLANE_IMAGE_UPDATE_CMD|AEROPLANE_UPDATE_REPO_URL|AEROPLANE_UPDATE_BRANCH|AEROPLANE_UPDATE_RESTART_CMD|AEROPLANE_SECRET_KEY|DATA_DIR|DEPLOY_DRY_RUN|CADDY_CONFIG_PATH|CADDY_RELOAD_CMD|PORT|HOST|PUBLIC_URL|CONTROL_PLANE_HOSTNAME|DEPLOY_HOST_PORT_START|DEPLOY_HOST_PORT_END|BUILDKIT_HOST|AEROPLANE_RUNTIME_NETWORK)=' "$env_file" > "$tmp_file" || true
+  else
+    : > "$tmp_file"
+  fi
 
-  cat > "$env_file" <<EOF
-AEROPLANE_IMAGE=$IMAGE
+  cat >> "$tmp_file" <<EOF
+AEROPLANE_INSTALL_MODE=git
 AEROPLANE_INSTALL_DIR=$INSTALL_DIR
+AEROPLANE_ENV_PATH=$INSTALL_DIR/.env
+AEROPLANE_REPO_URL=$REPO_URL
+AEROPLANE_REPO_BRANCH=$REPO_BRANCH
+AEROPLANE_UPDATE_REPO_URL=$REPO_URL
+AEROPLANE_UPDATE_BRANCH=$REPO_BRANCH
+AEROPLANE_UPDATE_RESTART_CMD="systemctl restart aeroplane"
 AEROPLANE_SECRET_KEY=$secret_key
-DATA_DIR=/data
+DATA_DIR=$INSTALL_DIR/data
 DEPLOY_DRY_RUN=false
-CADDY_CONFIG_PATH=/data/Caddyfile
+CADDY_CONFIG_PATH=$INSTALL_DIR/data/Caddyfile
 CADDY_RELOAD_CMD=true
 PORT=$PORT
 HOST=0.0.0.0
@@ -122,28 +180,45 @@ DEPLOY_HOST_PORT_START=$HOST_PORT_START
 DEPLOY_HOST_PORT_END=$HOST_PORT_END
 BUILDKIT_HOST=tcp://127.0.0.1:1234
 AEROPLANE_RUNTIME_NETWORK=aeroplane-runtime
-AEROPLANE_IMAGE_UPDATE_CMD="docker rm -f aeroplane-self-updater >/dev/null 2>&1 || true; docker run -d --name aeroplane-self-updater -v /var/run/docker.sock:/var/run/docker.sock -v $INSTALL_DIR:$INSTALL_DIR -w $INSTALL_DIR $IMAGE sh -lc 'docker compose pull aeroplane && docker compose up -d --no-deps aeroplane'"
 EOF
+
+  if [ -n "$control_plane_hostname" ]; then
+    printf 'CONTROL_PLANE_HOSTNAME=%s\n' "$control_plane_hostname" >> "$tmp_file"
+  fi
+
+  mv "$tmp_file" "$env_file"
+}
+
+clone_or_update_repo() {
+  if [ -d "$APP_DIR/.git" ]; then
+    say "Updating Aeroplane source..."
+    git -C "$APP_DIR" fetch origin "$REPO_BRANCH"
+    git -C "$APP_DIR" checkout "$REPO_BRANCH"
+    git -C "$APP_DIR" pull --ff-only origin "$REPO_BRANCH"
+    return
+  fi
+
+  if [ -e "$APP_DIR" ]; then
+    fail "$APP_DIR exists but is not a Git checkout. Move it aside and rerun the installer."
+  fi
+
+  say "Cloning Aeroplane..."
+  git clone --branch "$REPO_BRANCH" --single-branch "$REPO_URL" "$APP_DIR"
+}
+
+build_aeroplane() {
+  say "Installing Aeroplane dependencies..."
+  cd "$APP_DIR"
+  npm ci --include=dev
+
+  say "Building Aeroplane..."
+  npm run build
+  npm prune --omit=dev
 }
 
 write_compose_file() {
   cat > "$INSTALL_DIR/compose.yml" <<'EOF'
 services:
-  aeroplane:
-    image: ${AEROPLANE_IMAGE:-ghcr.io/akinloluwami/aeroplane:latest}
-    container_name: aeroplane
-    restart: unless-stopped
-    network_mode: host
-    env_file:
-      - .env
-    volumes:
-      - ./.env:/app/.env.local
-      - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - buildkit
-      - caddy
-
   buildkit:
     image: moby/buildkit:latest
     container_name: deploy-buildkit
@@ -170,12 +245,43 @@ volumes:
 EOF
 }
 
-start_aeroplane() {
+write_systemd_unit() {
+  command -v systemctl >/dev/null 2>&1 || fail "systemd is required to run Aeroplane from a Git checkout."
+
+  $SUDO tee /etc/systemd/system/aeroplane.service >/dev/null <<EOF
+[Unit]
+Description=Aeroplane control plane
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=$APP_DIR
+Environment=NODE_ENV=production
+Environment=AEROPLANE_ENV_PATH=$INSTALL_DIR/.env
+EnvironmentFile=-$INSTALL_DIR/.env
+ExecStart=/usr/bin/env node dist/server/index.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+start_runtime_services() {
   cd "$INSTALL_DIR"
-  say "Pulling Aeroplane image..."
-  $SUDO docker compose pull
+  say "Starting BuildKit and Caddy..."
+  $SUDO docker compose up -d buildkit caddy
+}
+
+start_aeroplane() {
   say "Starting Aeroplane..."
-  $SUDO docker compose up -d
+  $SUDO docker rm -f aeroplane >/dev/null 2>&1 || true
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now aeroplane
+  $SUDO systemctl restart aeroplane
 }
 
 print_firewall_hint() {
@@ -190,8 +296,11 @@ print_firewall_hint() {
 
 main() {
   require_linux
+  install_base_packages
+  install_node
   install_docker
   require_compose
+  install_railpack
 
   say "Creating $INSTALL_DIR..."
   $SUDO mkdir -p "$INSTALL_DIR/data"
@@ -200,19 +309,23 @@ main() {
   fi
 
   write_env_file
+  clone_or_update_repo
+  build_aeroplane
   write_compose_file
+  write_systemd_unit
+  start_runtime_services
   start_aeroplane
 
-  public_url="$(grep '^PUBLIC_URL=' "$INSTALL_DIR/.env" | cut -d= -f2-)"
+  public_url="$(get_env_value "$INSTALL_DIR/.env" PUBLIC_URL)"
   print_firewall_hint
   say ""
   say "Aeroplane is installed."
   say "Open: $public_url"
   say ""
   say "Manage it with:"
-  say "  cd $INSTALL_DIR"
-  say "  sudo docker compose logs -f aeroplane"
-  say "  sudo docker compose pull && sudo docker compose up -d"
+  say "  sudo journalctl -u aeroplane -f"
+  say "  cd $APP_DIR && git status"
+  say "  cd $INSTALL_DIR && sudo docker compose logs -f caddy buildkit"
 }
 
 main "$@"
