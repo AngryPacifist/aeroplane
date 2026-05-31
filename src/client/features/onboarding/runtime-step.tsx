@@ -19,8 +19,6 @@ export function RuntimeStep({
         <TextField label="DATA_DIR" value={form.dataDir} onChange={(dataDir) => update({ dataDir })} required />
         <TextField label="PUBLIC_URL" value={form.publicUrl} onChange={(publicUrl) => update({ publicUrl })} required />
         <TextField label="PORT" value={form.port} onChange={(port) => update({ port })} type="number" required />
-        <TextField label="DEPLOY_HOST_PORT_START" value={form.hostPortStart} onChange={(hostPortStart) => update({ hostPortStart })} type="number" required />
-        <TextField label="DEPLOY_HOST_PORT_END" value={form.hostPortEnd} onChange={(hostPortEnd) => update({ hostPortEnd })} type="number" required />
         <TextField label="BUILDKIT_HOST" value={form.buildkitHost} onChange={(buildkitHost) => update({ buildkitHost })} required />
         <TextField label="AEROPLANE_RUNTIME_NETWORK" value={form.runtimeNetworkName} onChange={(runtimeNetworkName) => update({ runtimeNetworkName })} required />
         <TextField label="CADDY_CONFIG_PATH" value={form.caddyConfigPath} onChange={(caddyConfigPath) => update({ caddyConfigPath })} required />
