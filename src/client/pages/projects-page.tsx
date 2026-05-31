@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { AddSquareIcon, FolderCodeIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { AddSquareIcon, FolderCodeIcon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { api, type GitHubStatus, type ProjectCard, type R2SettingsStatus, type ToolCheck } from "../api";
 import { BrandMark } from "../components/ui/brand-mark";
@@ -10,12 +10,11 @@ import { ServiceCluster } from "../features/projects/service-cluster";
 import { SystemHealthPill } from "../features/projects/system-health-pill";
 import { SetupTodoList } from "../features/projects/setup-todo-list";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
-import { SystemSettingsModal } from "../components/modals/system-settings-modal";
 import type { SystemSettingsTab } from "../components/modals/system-settings-types";
 import { SignOutButton } from "../components/auth/sign-out-button";
 import { usePageTitle } from "../lib/page-title";
 
-export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab }) {
+export function ProjectsPage() {
   const navigate = useNavigate();
   usePageTitle("Projects");
 
@@ -29,8 +28,6 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
   const [railwayImportOpen, setRailwayImportOpen] = useState(false);
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
   const [error, setError] = useState("");
-  const settingsOpen = Boolean(settingsTab);
-  const activeSettingsTab = settingsTab ?? "root-domain";
 
   const loadProjects = useCallback(async () => {
     setSetupLoading(true);
@@ -64,6 +61,15 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
     void loadProjects();
   }, [loadProjects]);
 
+  useEffect(() => {
+    function reloadAfterSettingsClose() {
+      void loadProjects();
+    }
+
+    window.addEventListener("aeroplane-system-settings-closed", reloadAfterSettingsClose);
+    return () => window.removeEventListener("aeroplane-system-settings-closed", reloadAfterSettingsClose);
+  }, [loadProjects]);
+
   async function createProject(payload: { name: string; description?: string }) {
     const result = await api.createProject(payload);
     await loadProjects();
@@ -71,15 +77,12 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
   }
 
   function openSystemSettings(tab: SystemSettingsTab = "root-domain") {
-    void navigate({ to: "/", search: { settings: tab } });
-  }
-
-  function closeSystemSettings() {
-    void navigate({ to: "/", search: {} });
-  }
-
-  function changeSystemSettingsTab(tab: SystemSettingsTab) {
-    void navigate({ to: "/", search: { settings: tab } });
+    void navigate({
+      search: (current) => ({
+        ...(current as Record<string, unknown>),
+        settings: tab
+      })
+    });
   }
 
   return (
@@ -126,15 +129,6 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
               >
                 <AppIcon icon={AddSquareIcon} size={14} />
                 New
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-                title="System Settings"
-                aria-label="System Settings"
-                onClick={() => openSystemSettings()}
-              >
-                <AppIcon icon={Settings01Icon} size={15} />
               </button>
               <SignOutButton />
             </div>
@@ -218,15 +212,6 @@ export function ProjectsPage({ settingsTab }: { settingsTab?: SystemSettingsTab 
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
       <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
       <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
-      <SystemSettingsModal
-        activeTab={activeSettingsTab}
-        onTabChange={changeSystemSettingsTab}
-        open={settingsOpen}
-        onClose={() => {
-          closeSystemSettings();
-          void loadProjects();
-        }}
-      />
     </>
   );
 }
