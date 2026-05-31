@@ -179,8 +179,16 @@ function imageManualUpdateCommand() {
   return "cd /opt/aeroplane && sudo docker compose pull aeroplane && sudo docker compose up -d aeroplane";
 }
 
+function normalizeLegacyImageUpdateCommand(command: string) {
+  return command.replace(/-v\s+([^:\s]+):\/work\s+-w\s+\/work/g, "-v $1:$1 -w $1");
+}
+
+function hasLegacyImageUpdateCommand(command: string) {
+  return /-v\s+[^:\s]+:\/work\s+-w\s+\/work/.test(command);
+}
+
 function configuredImageUpdateCommand() {
-  return config.imageUpdateCmd.trim();
+  return normalizeLegacyImageUpdateCommand(config.imageUpdateCmd.trim());
 }
 
 function imageUpdateCommand() {
@@ -392,6 +400,9 @@ async function runImageUpdate() {
   const command = configuredImageUpdateCommand();
   if (!command) {
     throw new Error(`Image self-update is not configured. Update it from the VPS with: ${imageManualUpdateCommand()}`);
+  }
+  if (hasLegacyImageUpdateCommand(config.imageUpdateCmd.trim())) {
+    appendLog("Detected legacy updater mount path and normalized it for this run.");
   }
 
   const gitDir = await ensureUpdateGitCache();
