@@ -241,7 +241,27 @@ async function getRemoteCommit(gitDir?: string) {
 }
 
 async function isWorkingTreeDirty() {
-  return (await readCommand("git", ["status", "--porcelain"])).length > 0;
+  return (await readCommand("git", ["status", "--porcelain", "--untracked-files=no"])).length > 0;
+}
+
+async function trackedStatusLines() {
+  const output = await readCommand("git", ["status", "--porcelain", "--untracked-files=no"]);
+  return output.split(/\r?\n/).filter(Boolean);
+}
+
+async function cleanInstallerLockfileDrift(logged = false) {
+  const statusLines = await trackedStatusLines();
+  if (statusLines.length === 1 && statusLines[0]?.endsWith(" package-lock.json")) {
+    if (logged) {
+      appendLog("Cleaning package-lock.json drift from dependency pruning.");
+      await runLogged("git", ["checkout", "--", "package-lock.json"]);
+    } else {
+      await readCommand("git", ["checkout", "--", "package-lock.json"]);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 async function isAncestor(base: string, target: string, gitDir?: string) {
@@ -346,7 +366,11 @@ export async function getSystemUpdateInfo(): Promise<SystemUpdateInfo> {
     }
 
     await fetchRemote();
-    const [currentCommit, remoteCommit, dirty] = await Promise.all([getCurrentCommit(), getRemoteCommit(), isWorkingTreeDirty()]);
+    let dirty = await isWorkingTreeDirty();
+    if (dirty && (await cleanInstallerLockfileDrift())) {
+      dirty = await isWorkingTreeDirty();
+    }
+    const [currentCommit, remoteCommit] = await Promise.all([getCurrentCommit(), getRemoteCommit()]);
     const currentIsAncestor = currentCommit === remoteCommit ? true : await isAncestor(currentCommit, remoteCommit);
     const status: SystemUpdateStatus = currentCommit === remoteCommit ? "current" : currentIsAncestor ? "available" : "diverged";
     const commits = status === "available" ? await commitsBetween(currentCommit, remoteCommit) : [];
@@ -446,7 +470,10 @@ async function runUpdate() {
       return;
     }
 
-    const dirty = await isWorkingTreeDirty();
+    let dirty = await isWorkingTreeDirty();
+    if (dirty && (await cleanInstallerLockfileDrift(true))) {
+      dirty = await isWorkingTreeDirty();
+    }
     if (dirty) {
       throw new Error("Cannot update while the Aeroplane working tree has local changes.");
     }
@@ -475,7 +502,7 @@ async function runUpdate() {
       npm_config_production: "false"
     });
     await runLogged(npmCommand(), ["run", "build"]);
-    await runLogged(npmCommand(), ["prune", "--omit=dev"]);
+    await runLogged(npmCommand(), ["prune", "--omit=dev", "--package-lock=false"]);
 
     if (queueRestart()) {
       activeRun.restartQueued = true;
