@@ -39,6 +39,9 @@ function applyEnvFile(filePath: string, { override = false } = {}) {
 
 applyEnvFile(resolve(process.cwd(), ".env"));
 applyEnvFile(resolve(process.cwd(), ".env.local"), { override: true });
+if (process.env.AEROPLANE_ENV_PATH) {
+  applyEnvFile(resolve(process.env.AEROPLANE_ENV_PATH), { override: true });
+}
 
 const defaultAeroplaneImage = process.env.AEROPLANE_IMAGE ?? "ghcr.io/akinloluwami/aeroplane:latest";
 const aeroplaneInstallDir = process.env.AEROPLANE_INSTALL_DIR ?? "/opt/aeroplane";
