@@ -827,6 +827,11 @@ async function runDeployment(deployment: Deployment, service: Service) {
     }
     await ensureBuildkitAvailable(deployment.id);
     const railpackArgs = ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id];
+    const railpackConfigFile = railpackEnv.RAILPACK_CONFIG_FILE;
+    if (railpackConfigFile) {
+      appendDeploymentLog(deployment.id, `Using Railpack config file: ${railpackConfigFile}`, "system", secrets);
+      railpackArgs.push("--config-file", railpackConfigFile);
+    }
     if (buildCommand) {
       railpackArgs.push("--build-cmd", buildCommand);
     }
