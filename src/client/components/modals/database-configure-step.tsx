@@ -4,7 +4,6 @@ import { api } from "../../api";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
 import { getDatabaseOption, type DatabaseType, type EnvEntry } from "./database-service-options";
 import { generateDatabaseHostname } from "./database-hostname";
-import { DatabasePublicAccessFields } from "./database-public-access-fields";
 
 interface DatabaseConfigureStepProps {
   dbType: DatabaseType;
@@ -35,7 +34,6 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
   const [name, setName] = useState("");
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>([]);
   const [rootDomain, setRootDomain] = useState("");
-  const [publicEnabled, setPublicEnabled] = useState(false);
   const [publicHostname, setPublicHostname] = useState("");
 
   const dbOption = getDatabaseOption(dbType);
@@ -71,7 +69,6 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
     }
 
     setEnvEntries(list);
-    setPublicEnabled(false);
     setPublicHostname("");
   }, [dbType]);
 
@@ -90,8 +87,8 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
   }, []);
 
   useEffect(() => {
-    setPublicHostname(publicEnabled ? generateDatabaseHostname(name, rootDomain) : "");
-  }, [name, publicEnabled, rootDomain]);
+    setPublicHostname(generateDatabaseHostname(name, rootDomain));
+  }, [name, rootDomain]);
 
   function updateEnvValue(key: string, value: string) {
     setEnvEntries((current) => {
@@ -110,8 +107,8 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
       repoUrl: "database",
       branch: "main",
       internalPort: defaultPort,
-      databasePublicEnabled: publicEnabled,
-      databasePublicHostname: publicEnabled ? publicHostname.trim().toLowerCase() : undefined,
+      databasePublicEnabled: true,
+      databasePublicHostname: publicHostname.trim().toLowerCase() || undefined,
       env: envEntries
     });
   }
@@ -126,7 +123,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             </div>
             <div>
               <h4 className="text-sm font-semibold text-zinc-100">Deploying {dbLabel}</h4>
-              <p className="text-xs text-zinc-400">Private runtime hostname now, public hostname only if enabled.</p>
+              <p className="text-xs text-zinc-400">Aeroplane creates private and public connection URLs automatically.</p>
             </div>
           </div>
 
@@ -149,15 +146,20 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             </div>
           </div>
 
-          <DatabasePublicAccessFields
-            enabled={publicEnabled}
-            hostname={publicHostname}
-            rootDomain={rootDomain}
-            disabled={busy}
-            onEnabledChange={(enabled) => {
-              setPublicEnabled(enabled);
-            }}
-          />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <FieldLabel>Public hostname</FieldLabel>
+              <div className="flex h-11 min-w-0 items-center border border-zinc-800 bg-zinc-950 px-3 font-mono text-xs text-[#7fe3dd]">
+                <span className="truncate">{publicHostname || "Set root domain first"}</span>
+              </div>
+            </div>
+            <div>
+              <FieldLabel>Public URL variable</FieldLabel>
+              <div className="flex h-11 min-w-0 items-center border border-zinc-800 bg-zinc-950 px-3 font-mono text-xs text-zinc-100">
+                <span className="truncate">{dbType === "postgres" ? "POSTGRES_PUBLIC_URL" : `${dbType.toUpperCase()}_PUBLIC_URL`}</span>
+              </div>
+            </div>
+          </div>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 border-b border-zinc-800 pb-2">
@@ -199,7 +201,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
           <AppIcon icon={ArrowLeft01Icon} size={16} />
           Back
         </button>
-        <button type="submit" className={shellButton("primary")} disabled={busy || !name.trim() || (publicEnabled && !publicHostname.trim())}>
+        <button type="submit" className={shellButton("primary")} disabled={busy || !name.trim()}>
           <AppIcon icon={AddSquareIcon} size={16} />
           {busy ? "Deploying..." : "Deploy Database"}
         </button>
