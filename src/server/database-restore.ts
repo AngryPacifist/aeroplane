@@ -7,6 +7,13 @@ import { db } from "./db.js";
 import { runDockerExec } from "./database-viewer-shared.js";
 import { envVars, type Service } from "./schema.js";
 import { eq } from "drizzle-orm";
+import {
+  ensurePostgresTlsAssets,
+  postgresTlsServerArgs,
+  postgresTlsVolumeCreateDockerArgs,
+  postgresTlsVolumePrepareDockerPlan,
+  postgresTlsVolumeArg
+} from "./postgres-tls.js";
 
 export type MigrationDatabaseDump = {
   serviceId: string;
@@ -88,7 +95,8 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
   const dbType = databaseTypeForService(service);
   const containerName = containerNameForService(service.id);
   const image = databaseImage(dbType);
-  const bindHost = service.databasePublicEnabled ? "0.0.0.0" : "127.0.0.1";
+  const bindHost = "0.0.0.0";
+  const postgresTlsAssets = dbType === "postgres" ? await ensurePostgresTlsAssets(service) : null;
   const dockerArgs = [
     "run",
     "-d",
@@ -104,6 +112,9 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
     `${bindHost}:${service.hostPort}:${service.internalPort}`
   ];
 
+  if (postgresTlsAssets) {
+    dockerArgs.push("-v", postgresTlsVolumeArg(postgresTlsAssets));
+  }
   if (dbType === "clickhouse") {
     dockerArgs.push("--ulimit", "nofile=262144:262144");
   }
@@ -111,8 +122,22 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
     dockerArgs.push("--env", `${key}=${value}`);
   }
   dockerArgs.push(image);
+  if (postgresTlsAssets) {
+    dockerArgs.push(...postgresTlsServerArgs());
+  }
 
   await runDocker(["pull", image]);
+  if (postgresTlsAssets) {
+    await runDocker(postgresTlsVolumeCreateDockerArgs(postgresTlsAssets));
+    const prep = postgresTlsVolumePrepareDockerPlan(image, postgresTlsAssets);
+    try {
+      for (const args of prep.commands) {
+        await runDocker(args);
+      }
+    } finally {
+      await runDocker(prep.cleanupCommand).catch(() => undefined);
+    }
+  }
   await ensureRuntimeNetwork();
   await runDocker(["rm", "-f", containerName]).catch(() => undefined);
   await runDocker(dockerArgs);
