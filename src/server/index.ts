@@ -95,6 +95,10 @@ app.use("*", logger());
 app.use("/api/*", cors());
 
 const optionalString = z.string().trim().optional().transform((value) => (value ? value : undefined));
+const optionalCommand = z.string().trim().optional().transform((value) => {
+  if (!value) return undefined;
+  return value.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, "\"");
+});
 const optionalRootDir = z
   .string()
   .trim()
@@ -125,9 +129,9 @@ const serviceSettingsSchema = z.object({
   branch: z.string().trim().min(1).default("main"),
   rootDir: optionalRootDir,
   githubToken: optionalString,
-  installCommand: optionalString,
-  buildCommand: optionalString,
-  startCommand: optionalString,
+  installCommand: optionalCommand,
+  buildCommand: optionalCommand,
+  startCommand: optionalCommand,
   staticOutput: optionalString,
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
   databasePublicEnabled: z.boolean().optional().default(true),
@@ -274,9 +278,9 @@ const updateServiceSchema = z.object({
   branch: z.string().trim().min(1).optional(),
   rootDir: optionalRootDir,
   githubToken: optionalString.nullish(),
-  installCommand: optionalString.nullish(),
-  buildCommand: optionalString.nullish(),
-  startCommand: optionalString.nullish(),
+  installCommand: optionalCommand.nullish(),
+  buildCommand: optionalCommand.nullish(),
+  startCommand: optionalCommand.nullish(),
   staticOutput: optionalString.nullish(),
   internalPort: z.coerce.number().int().min(1).max(65535).optional(),
   databasePublicEnabled: z.boolean().optional(),
@@ -814,6 +818,10 @@ function resolveMaskedSecret(input: string, existing: string) {
   return value;
 }
 
+function onboardingSettingsError(error: unknown) {
+  return error instanceof Error ? error.message : "Could not apply onboarding settings";
+}
+
 async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSchema>, options: { generateSecretKeyIfMissing: boolean }) {
   const secretKey = input.env.secretKey || process.env.AEROPLANE_SECRET_KEY || config.secretKey || (options.generateSecretKeyIfMissing ? generateSecretKey() : "");
   const managedEnv = {
@@ -864,7 +872,12 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
     };
 
     if (parsedR2.data.createBucket) {
-      await ensureR2Bucket(r2);
+      try {
+        await ensureR2Bucket(r2);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not verify R2 bucket";
+        throw new Error(`R2 setup failed: ${message}`);
+      }
     }
   }
 
@@ -899,7 +912,7 @@ app.post("/api/auth/setup", async (c) => {
   try {
     envPath = await applyOnboardingSettings(body.data, { generateSecretKeyIfMissing: true });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Could not apply onboarding settings", 400);
+    return jsonError(onboardingSettingsError(error), 400);
   }
 
   const user = createOwner(body.data.owner);
@@ -973,7 +986,7 @@ app.post("/api/system/onboarding/restart", async (c) => {
     const envPath = await applyOnboardingSettings(body.data, { generateSecretKeyIfMissing: false });
     return c.json({ ok: true, envPath, restartRequired: true });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Could not apply onboarding settings", 400);
+    return jsonError(onboardingSettingsError(error), 400);
   }
 });
 
