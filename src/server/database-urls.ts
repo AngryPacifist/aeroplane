@@ -27,6 +27,16 @@ export function normalizeDatabaseType(value: string) {
   return "postgres";
 }
 
+export function slugifyDatabaseHostnamePart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "database";
+}
+
+export function generateDatabaseHostname(name: string, rootDomain: string) {
+  const domain = rootDomain.trim().toLowerCase();
+  if (!domain) return "";
+  return `${slugifyDatabaseHostnamePart(name)}.${domain}`;
+}
+
 export function defaultDatabasePort(dbType: string) {
   if (dbType === "mysql") return 3306;
   if (dbType === "redis") return 6379;
