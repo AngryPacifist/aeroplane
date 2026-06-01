@@ -69,7 +69,11 @@ import {
   createDatabaseBackup,
   deleteDatabaseBackup,
   getDatabaseBackupFile,
-  listDatabaseBackups
+  getDatabaseBackupSettings,
+  listDatabaseBackups,
+  restoreDatabaseBackup,
+  startDatabaseBackupScheduler,
+  updateDatabaseBackupSettings
 } from "./database-backups.js";
 import {
   deleteDatabaseRow,
@@ -175,7 +179,11 @@ const databaseDeleteSchema = z.object({
   primaryKey: databaseRowSchema
 });
 const backupCreateSchema = z.object({
-  storage: z.enum(["disk", "disk+r2"]).default("disk")
+  storage: z.enum(["disk", "r2", "disk+r2"]).optional()
+});
+const backupSettingsSchema = z.object({
+  storage: z.enum(["disk", "r2", "disk+r2"]).optional(),
+  automaticEnabled: z.boolean().optional()
 });
 const postgresUrlImportSchema = z.object({
   sourceUrl: z.string().trim().min(1, "Postgres URL is required")
@@ -1550,9 +1558,27 @@ app.delete("/api/services/:serviceId/database/rows", async (c) => {
 
 app.get("/api/services/:serviceId/database/backups", (c) => {
   try {
-    return c.json({ backups: listDatabaseBackups(c.req.param("serviceId")), r2: publicR2Settings() });
+    const serviceId = c.req.param("serviceId");
+    return c.json({
+      backups: listDatabaseBackups(serviceId),
+      settings: getDatabaseBackupSettings(serviceId),
+      r2: publicR2Settings()
+    });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Could not load backups", 400);
+  }
+});
+
+app.patch("/api/services/:serviceId/database/backups/settings", async (c) => {
+  const body = backupSettingsSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid backup settings");
+  }
+
+  try {
+    return c.json({ settings: updateDatabaseBackupSettings(c.req.param("serviceId"), body.data) });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not update backup settings", 400);
   }
 });
 
@@ -1569,18 +1595,34 @@ app.post("/api/services/:serviceId/database/backups", async (c) => {
   }
 });
 
-app.get("/api/services/:serviceId/database/backups/:backupId/download", (c) => {
+app.get("/api/services/:serviceId/database/backups/:backupId/download", async (c) => {
+  let cleanup: null | (() => void) = null;
   try {
-    const { backup, localPath } = getDatabaseBackupFile(c.req.param("serviceId"), c.req.param("backupId"));
+    const file = getDatabaseBackupFile(c.req.param("serviceId"), c.req.param("backupId"));
+    cleanup = file.cleanup;
+    const { backup, localPath, download } = file;
     const fileName = backup.fileName || basename(localPath);
-    return new Response(readFileSync(localPath), {
+    await download;
+    const body = readFileSync(localPath);
+    cleanup?.();
+    cleanup = null;
+    return new Response(body, {
       headers: {
         "Content-Disposition": `attachment; filename="${fileName}"`,
         "Content-Type": "application/octet-stream"
       }
     });
   } catch (error) {
+    cleanup?.();
     return jsonError(error instanceof Error ? error.message : "Could not download backup", 404);
+  }
+});
+
+app.post("/api/services/:serviceId/database/backups/:backupId/restore", async (c) => {
+  try {
+    return c.json(await restoreDatabaseBackup(c.req.param("serviceId"), c.req.param("backupId")));
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not restore backup", 400);
   }
 });
 
@@ -2111,6 +2153,7 @@ ensureDefaultDomainsForExistingServices();
 void writeAndReloadCaddy().catch((error) => {
   console.error("Failed to write Caddy config on startup:", error);
 });
+startDatabaseBackupScheduler();
 startDeployWorker();
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
