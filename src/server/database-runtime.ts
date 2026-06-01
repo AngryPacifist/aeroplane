@@ -1,0 +1,37 @@
+export const databaseVolumeHelperImage = "alpine:3.20";
+
+function safeDockerIdentifier(value: string, fallback: string) {
+  return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "") || fallback;
+}
+
+export function databaseImage(dbType: string) {
+  if (dbType === "postgres") return "postgres:18-alpine";
+  if (dbType === "mysql") return "mysql:8";
+  if (dbType === "redis") return "redis:7-alpine";
+  if (dbType === "mongodb" || dbType === "mongo") return "mongo:6";
+  if (dbType === "clickhouse") return "clickhouse/clickhouse-server:latest";
+  return "postgres:18-alpine";
+}
+
+export function databaseDataVolumeName(serviceId: string) {
+  return `aeroplane-db-data-${safeDockerIdentifier(serviceId, "service")}`;
+}
+
+export function databaseDataMountPath(dbType: string) {
+  if (dbType === "postgres") return "/var/lib/postgresql";
+  if (dbType === "mysql") return "/var/lib/mysql";
+  if (dbType === "redis") return "/data";
+  if (dbType === "mongodb" || dbType === "mongo") return "/data/db";
+  if (dbType === "clickhouse") return "/var/lib/clickhouse";
+  return "/var/lib/postgresql";
+}
+
+export function databaseDataMountCandidates(dbType: string) {
+  const primary = databaseDataMountPath(dbType);
+  if (dbType === "postgres") return [primary, "/var/lib/postgresql/data"];
+  return [primary];
+}
+
+export function databaseDataVolumeArg(serviceId: string, dbType: string) {
+  return `${databaseDataVolumeName(serviceId)}:${databaseDataMountPath(dbType)}`;
+}
