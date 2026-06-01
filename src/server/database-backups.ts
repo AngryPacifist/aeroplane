@@ -1,19 +1,43 @@
 import { desc, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { nanoid } from "nanoid";
 import { config } from "./config.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { runDockerExec, type DatabaseContext } from "./database-viewer-shared.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
-import { db, nowIso } from "./db.js";
-import { deleteR2Object, uploadFileToR2 } from "./r2-storage.js";
-import { databaseBackups, envVars, type DatabaseBackup } from "./schema.js";
+import { db, nowIso, sqlite } from "./db.js";
+import { restoreDatabaseDump } from "./database-restore.js";
+import { deleteR2Object, downloadR2ObjectToFile, uploadFileToR2 } from "./r2-storage.js";
+import { databaseBackups, databaseBackupSettings, envVars, services, type DatabaseBackup, type DatabaseBackupSettings } from "./schema.js";
 import { getSystemSettings } from "./system-settings.js";
 
-export type BackupStorageTarget = "disk" | "disk+r2";
+export type BackupStorageTarget = "disk" | "r2" | "disk+r2";
+export type BackupTrigger = "manual" | "daily" | "weekly" | "monthly";
+
+export type PublicDatabaseBackupSettings = {
+  storage: BackupStorageTarget;
+  automaticEnabled: boolean;
+  defaultStorage: BackupStorageTarget;
+  schedules: Array<{
+    trigger: Exclude<BackupTrigger, "manual">;
+    intervalHours: number;
+    retentionDays: number;
+  }>;
+};
+
+const backupSchedules = [
+  { trigger: "daily" as const, intervalMs: 24 * 60 * 60 * 1000, intervalHours: 24, retentionDays: 6 },
+  { trigger: "weekly" as const, intervalMs: 7 * 24 * 60 * 60 * 1000, intervalHours: 7 * 24, retentionDays: 31 },
+  { trigger: "monthly" as const, intervalMs: 30 * 24 * 60 * 60 * 1000, intervalHours: 30 * 24, retentionDays: 90 }
+];
+
+const validStorageTargets = new Set<BackupStorageTarget>(["disk", "r2", "disk+r2"]);
+const activeAutomaticBackups = new Set<string>();
+let schedulerStarted = false;
 
 function envMapForService(serviceId: string) {
   const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
@@ -82,6 +106,26 @@ async function copyBackupFromContainer(ctx: DatabaseContext, remotePath: string,
 
 function fileSha256(localPath: string) {
   return createHash("sha256").update(readFileSync(localPath)).digest("hex");
+}
+
+function defaultStorageTarget(): BackupStorageTarget {
+  return getSystemSettings().r2 ? "disk+r2" : "disk";
+}
+
+function normalizeStorageTarget(value: string | null | undefined): BackupStorageTarget {
+  return validStorageTargets.has(value as BackupStorageTarget) ? value as BackupStorageTarget : defaultStorageTarget();
+}
+
+function publicBackupSettings(row?: DatabaseBackupSettings | null): PublicDatabaseBackupSettings {
+  const fallback = defaultStorageTarget();
+  const storedStorage = normalizeStorageTarget(row?.storage);
+  const storage = fallback === "disk" && (storedStorage === "r2" || storedStorage === "disk+r2") ? "disk" : storedStorage;
+  return {
+    storage,
+    automaticEnabled: row?.automaticEnabled ?? true,
+    defaultStorage: fallback,
+    schedules: backupSchedules.map(({ trigger, intervalHours, retentionDays }) => ({ trigger, intervalHours, retentionDays }))
+  };
 }
 
 async function createPostgresBackup(ctx: DatabaseContext, backupId: string) {
@@ -187,10 +231,11 @@ function publicBackup(row: DatabaseBackup) {
     serviceId: row.serviceId,
     engine: row.engine,
     status: row.status,
+    trigger: row.trigger as BackupTrigger,
     storage: row.storage,
     format: row.format,
     localPath: row.localPath,
-    fileName: row.localPath ? basename(row.localPath) : null,
+    fileName: row.localPath ? basename(row.localPath) : row.r2Key ? basename(row.r2Key) : null,
     r2Key: row.r2Key,
     sizeBytes: row.sizeBytes,
     checksum: row.checksum,
@@ -199,6 +244,46 @@ function publicBackup(row: DatabaseBackup) {
     startedAt: row.startedAt,
     finishedAt: row.finishedAt
   };
+}
+
+export function getDatabaseBackupSettings(serviceId: string) {
+  databaseContext(serviceId);
+  const settings = db.select().from(databaseBackupSettings).where(eq(databaseBackupSettings.serviceId, serviceId)).get();
+  return publicBackupSettings(settings);
+}
+
+export function updateDatabaseBackupSettings(
+  serviceId: string,
+  input: { storage?: BackupStorageTarget; automaticEnabled?: boolean }
+) {
+  databaseContext(serviceId);
+  const current = getDatabaseBackupSettings(serviceId);
+  const storage = input.storage ? normalizeStorageTarget(input.storage) : current.storage;
+  if ((storage === "r2" || storage === "disk+r2") && !getSystemSettings().r2) {
+    throw new Error("Connect R2 in System Settings before selecting R2 backups.");
+  }
+
+  const timestamp = nowIso();
+  db.insert(databaseBackupSettings)
+    .values({
+      serviceId,
+      storage,
+      automaticEnabled: input.automaticEnabled ?? current.automaticEnabled,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    })
+    .onConflictDoUpdate({
+      target: databaseBackupSettings.serviceId,
+      set: {
+        storage,
+        automaticEnabled: input.automaticEnabled ?? current.automaticEnabled,
+        updatedAt: timestamp
+      }
+    })
+    .run();
+
+  const next = db.select().from(databaseBackupSettings).where(eq(databaseBackupSettings.serviceId, serviceId)).get();
+  return publicBackupSettings(next);
 }
 
 export function listDatabaseBackups(serviceId: string) {
@@ -212,22 +297,29 @@ export function listDatabaseBackups(serviceId: string) {
     .map(publicBackup);
 }
 
-export async function createDatabaseBackup(serviceId: string, storage: BackupStorageTarget) {
+export async function createDatabaseBackup(serviceId: string, storage?: BackupStorageTarget, trigger: BackupTrigger = "manual") {
   const ctx = databaseContext(serviceId);
   const settings = getSystemSettings();
-  if (storage === "disk+r2" && !settings.r2) {
+  const target = storage ?? getDatabaseBackupSettings(serviceId).storage;
+  if ((target === "r2" || target === "disk+r2") && !settings.r2) {
     throw new Error("Connect R2 in System Settings before uploading backups.");
   }
 
   const backupId = nanoid(10);
   const createdAt = nowIso();
+  let localBackup: Awaited<ReturnType<typeof createLocalBackup>> | null = null;
+  let sizeBytes: number | null = null;
+  let checksum: string | null = null;
+  let r2UploadStarted = false;
+
   db.insert(databaseBackups)
     .values({
       id: backupId,
       serviceId,
       engine: ctx.dbType,
       status: "running",
-      storage,
+      trigger,
+      storage: target,
       format: "pending",
       localPath: null,
       r2Key: null,
@@ -241,25 +333,32 @@ export async function createDatabaseBackup(serviceId: string, storage: BackupSto
     .run();
 
   try {
-    const local = await createLocalBackup(ctx, backupId);
-    const stats = statSync(local.localPath);
-    const checksum = fileSha256(local.localPath);
+    localBackup = await createLocalBackup(ctx, backupId);
+    const stats = statSync(localBackup.localPath);
+    sizeBytes = stats.size;
+    checksum = fileSha256(localBackup.localPath);
     let r2Key: string | null = null;
+    let localPath: string | null = localBackup.localPath;
 
-    if (storage === "disk+r2") {
+    if (target === "r2" || target === "disk+r2") {
       const r2 = settings.r2;
       if (!r2) throw new Error("R2 is not connected");
-      r2Key = `database-backups/${ctx.service.projectId}/${ctx.service.slug}/${basename(local.localPath)}`;
-      await uploadFileToR2(r2, local.localPath, r2Key);
+      r2Key = `database-backups/${ctx.service.projectId}/${ctx.service.slug}/${basename(localBackup.localPath)}`;
+      r2UploadStarted = true;
+      await uploadFileToR2(r2, localBackup.localPath, r2Key);
+    }
+    if (target === "r2") {
+      rmSync(localBackup.localPath, { force: true });
+      localPath = null;
     }
 
     db.update(databaseBackups)
       .set({
         status: "succeeded",
-        format: local.format,
-        localPath: local.localPath,
+        format: localBackup.format,
+        localPath,
         r2Key,
-        sizeBytes: stats.size,
+        sizeBytes,
         checksum,
         error: null,
         finishedAt: nowIso()
@@ -267,15 +366,45 @@ export async function createDatabaseBackup(serviceId: string, storage: BackupSto
       .where(eq(databaseBackups.id, backupId))
       .run();
   } catch (error) {
-    db.update(databaseBackups)
-      .set({
-        status: "failed",
-        error: error instanceof Error ? error.message : "Backup failed",
-        finishedAt: nowIso()
-      })
-      .where(eq(databaseBackups.id, backupId))
-      .run();
-    throw error;
+    const errorMessage = error instanceof Error ? error.message : "Backup failed";
+    const failedFields: {
+      status: "failed";
+      error: string;
+      finishedAt: string;
+      format?: string;
+      localPath?: string;
+      sizeBytes?: number;
+      checksum?: string;
+    } = {
+      status: "failed",
+      error: errorMessage,
+      finishedAt: nowIso()
+    };
+
+    if (target === "disk+r2" && r2UploadStarted && localBackup?.localPath && existsSync(localBackup.localPath)) {
+      db.update(databaseBackups)
+        .set({
+          status: "succeeded",
+          format: localBackup.format,
+          localPath: localBackup.localPath,
+          r2Key: null,
+          sizeBytes: sizeBytes ?? statSync(localBackup.localPath).size,
+          checksum: checksum ?? fileSha256(localBackup.localPath),
+          error: `R2 upload failed: ${errorMessage}`,
+          finishedAt: nowIso()
+        })
+        .where(eq(databaseBackups.id, backupId))
+        .run();
+    } else {
+      db.update(databaseBackups)
+        .set(failedFields)
+        .where(eq(databaseBackups.id, backupId))
+        .run();
+      if (target === "r2" && localBackup?.localPath && existsSync(localBackup.localPath)) {
+        rmSync(localBackup.localPath, { force: true });
+      }
+      throw error;
+    }
   }
 
   const backup = db.select().from(databaseBackups).where(eq(databaseBackups.id, backupId)).get();
@@ -290,10 +419,45 @@ export function getDatabaseBackupFile(serviceId: string, backupId: string) {
     .from(databaseBackups)
     .where(eq(databaseBackups.id, backupId))
     .get();
-  if (!backup || backup.serviceId !== serviceId || !backup.localPath || !existsSync(backup.localPath)) {
+  if (!backup || backup.serviceId !== serviceId) {
     throw new Error("Backup file not found");
   }
-  return { backup: publicBackup(backup), localPath: backup.localPath };
+
+  if (backup.localPath && existsSync(backup.localPath)) {
+    return { backup: publicBackup(backup), localPath: backup.localPath, cleanup: null as null | (() => void), download: null as null | Promise<void> };
+  }
+
+  const r2 = getSystemSettings().r2;
+  if (!backup.r2Key || !r2) {
+    throw new Error("Backup file not found");
+  }
+
+  const tempDir = mkdtempSync(join(tmpdir(), "aeroplane-backup-download-"));
+  const localPath = join(tempDir, basename(backup.r2Key));
+  return {
+    backup: publicBackup(backup),
+    localPath,
+    cleanup: () => rmSync(tempDir, { recursive: true, force: true }),
+    download: downloadR2ObjectToFile(r2, backup.r2Key, localPath)
+  };
+}
+
+export async function restoreDatabaseBackup(serviceId: string, backupId: string) {
+  const { backup, localPath, cleanup, download } = getDatabaseBackupFile(serviceId, backupId);
+  if (download) await download;
+  try {
+    await restoreDatabaseDump({
+      serviceId,
+      engine: backup.engine,
+      format: backup.format,
+      path: backup.fileName ?? backup.id,
+      sizeBytes: backup.sizeBytes ?? statSync(localPath).size,
+      checksum: backup.checksum ?? fileSha256(localPath)
+    }, localPath);
+  } finally {
+    cleanup?.();
+  }
+  return { ok: true, restoredAt: nowIso(), backup };
 }
 
 export async function deleteDatabaseBackup(serviceId: string, backupId: string) {
@@ -318,4 +482,70 @@ export async function deleteDatabaseBackup(serviceId: string, backupId: string) 
 
   db.delete(databaseBackups).where(eq(databaseBackups.id, backupId)).run();
   return { ok: true };
+}
+
+async function pruneScheduledBackups(serviceId: string, trigger: Exclude<BackupTrigger, "manual">) {
+  const schedule = backupSchedules.find((item) => item.trigger === trigger);
+  if (!schedule) return;
+
+  const cutoff = new Date(Date.now() - schedule.retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db
+    .select()
+    .from(databaseBackups)
+    .where(eq(databaseBackups.serviceId, serviceId))
+    .all()
+    .filter((backup) => backup.trigger === trigger && backup.createdAt < cutoff);
+
+  for (const backup of rows) {
+    await deleteDatabaseBackup(serviceId, backup.id).catch(() => undefined);
+  }
+}
+
+function latestScheduledBackupAt(serviceId: string, trigger: Exclude<BackupTrigger, "manual">) {
+  const row = sqlite
+    .prepare("SELECT created_at FROM database_backups WHERE project_id = ? AND trigger = ? AND status IN ('running', 'succeeded') ORDER BY created_at DESC LIMIT 1")
+    .get(serviceId, trigger) as { created_at: string } | undefined;
+  return row?.created_at ? new Date(row.created_at).getTime() : 0;
+}
+
+async function runAutomaticBackupsOnce() {
+  const databaseServices = db.select().from(services).all().filter(isDatabaseService);
+
+  for (const service of databaseServices) {
+    const settings = getDatabaseBackupSettings(service.id);
+    if (!settings.automaticEnabled) continue;
+
+    for (const schedule of backupSchedules) {
+      const key = `${service.id}:${schedule.trigger}`;
+      if (activeAutomaticBackups.has(key)) continue;
+
+      const lastBackupAt = latestScheduledBackupAt(service.id, schedule.trigger);
+      if (lastBackupAt && Date.now() - lastBackupAt < schedule.intervalMs) {
+        await pruneScheduledBackups(service.id, schedule.trigger);
+        continue;
+      }
+
+      activeAutomaticBackups.add(key);
+      try {
+        await createDatabaseBackup(service.id, settings.storage, schedule.trigger);
+        await pruneScheduledBackups(service.id, schedule.trigger);
+      } catch (error) {
+        console.error(`Automatic ${schedule.trigger} backup failed for ${service.name}:`, error);
+      } finally {
+        activeAutomaticBackups.delete(key);
+      }
+    }
+  }
+}
+
+export function startDatabaseBackupScheduler() {
+  if (schedulerStarted) return;
+  schedulerStarted = true;
+  const run = () => {
+    void runAutomaticBackupsOnce().catch((error) => {
+      console.error("Automatic database backup scheduler failed:", error);
+    });
+  };
+  setTimeout(run, 60_000);
+  setInterval(run, 60 * 60 * 1000);
 }
