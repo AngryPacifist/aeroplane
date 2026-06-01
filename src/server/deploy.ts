@@ -826,9 +826,17 @@ async function runDeployment(deployment: Deployment, service: Service) {
       appendDeploymentLog(deployment.id, "Applying command overrides through Railpack.");
     }
     await ensureBuildkitAvailable(deployment.id);
+    const railpackArgs = ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id];
+    if (buildCommand) {
+      railpackArgs.push("--build-cmd", buildCommand);
+    }
+    if (startCommand) {
+      railpackArgs.push("--start-cmd", startCommand);
+    }
+    railpackArgs.push(appDir);
     await runCommand(
       "railpack",
-      ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id, appDir],
+      railpackArgs,
       deployment.id,
       { env: railpackEnv, redact: secrets }
     );
