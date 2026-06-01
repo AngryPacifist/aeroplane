@@ -4,10 +4,11 @@ import { db, nowIso } from "./db.js";
 import { services, envVars, projectGroups } from "./schema.js";
 import { allocateHostPort } from "./deploy.js";
 import { writeAndReloadCaddy } from "./caddy.js";
-import { buildDatabaseConnectionUrl, defaultDatabasePort, generatedDatabaseEnvVars, normalizeDatabaseType } from "./database-urls.js";
+import { buildDatabaseConnectionUrl, defaultDatabasePort, generateDatabaseHostname, generatedDatabaseEnvVars, normalizeDatabaseType } from "./database-urls.js";
 import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { ensureDefaultDomainForService } from "./service-domains.js";
 import { recordServiceImportSource } from "./service-import-sources.js";
+import { getSystemSettings } from "./system-settings.js";
 
 type GraphQLTypeRef = {
   kind?: string | null;
@@ -459,6 +460,9 @@ ${serviceInstanceCommandSelection}
 
     const hostPort = allocateHostPort();
     const targetServiceId = nanoid(10);
+    const databasePublicHostname = isDatabase
+      ? generateDatabaseHostname(serviceSlug, getSystemSettings().rootDomain) || null
+      : null;
 
     // Insert Service
     db.insert(services).values({
@@ -479,8 +483,8 @@ ${serviceInstanceCommandSelection}
       internalPort,
       hostPort,
       activePort: null,
-      databasePublicEnabled: false,
-      databasePublicHostname: null,
+      databasePublicEnabled: isDatabase,
+      databasePublicHostname,
       status: "idle",
       lastDeployedAt: null,
       createdAt: timestamp,
