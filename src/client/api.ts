@@ -154,7 +154,8 @@ export type DatabaseBackup = {
   serviceId: string;
   engine: string;
   status: "running" | "succeeded" | "failed";
-  storage: "disk" | "disk+r2";
+  trigger: "manual" | "daily" | "weekly" | "monthly";
+  storage: BackupStorageTarget;
   format: string;
   localPath: null | string;
   fileName: null | string;
@@ -165,6 +166,19 @@ export type DatabaseBackup = {
   createdAt: string;
   startedAt: null | string;
   finishedAt: null | string;
+};
+
+export type BackupStorageTarget = "disk" | "r2" | "disk+r2";
+
+export type DatabaseBackupSettings = {
+  storage: BackupStorageTarget;
+  automaticEnabled: boolean;
+  defaultStorage: BackupStorageTarget;
+  schedules: Array<{
+    trigger: "daily" | "weekly" | "monthly";
+    intervalHours: number;
+    retentionDays: number;
+  }>;
 };
 
 export type ServiceImportSource = {
@@ -667,14 +681,21 @@ export const api = {
     };
   },
   databaseBackups: (serviceId: string) =>
-    request<{ backups: DatabaseBackup[]; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
-  createDatabaseBackup: (serviceId: string, storage: "disk" | "disk+r2") =>
+    request<{ backups: DatabaseBackup[]; settings: DatabaseBackupSettings; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
+  updateDatabaseBackupSettings: (serviceId: string, body: Partial<Pick<DatabaseBackupSettings, "storage" | "automaticEnabled">>) =>
+    request<{ settings: DatabaseBackupSettings }>(`/api/services/${serviceId}/database/backups/settings`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
+  createDatabaseBackup: (serviceId: string, storage?: BackupStorageTarget) =>
     request<{ backup: DatabaseBackup }>(`/api/services/${serviceId}/database/backups`, {
       method: "POST",
-      body: JSON.stringify({ storage })
+      body: JSON.stringify(storage ? { storage } : {})
     }),
   deleteDatabaseBackup: (serviceId: string, backupId: string) =>
     request<{ ok: boolean }>(`/api/services/${serviceId}/database/backups/${backupId}`, { method: "DELETE" }),
+  restoreDatabaseBackup: (serviceId: string, backupId: string) =>
+    request<{ ok: boolean; restoredAt: string; backup: DatabaseBackup }>(`/api/services/${serviceId}/database/backups/${backupId}/restore`, { method: "POST" }),
   databaseBackupDownloadUrl: (serviceId: string, backupId: string) =>
     `/api/services/${serviceId}/database/backups/${backupId}/download`,
   serviceImportSources: (serviceId: string) =>
