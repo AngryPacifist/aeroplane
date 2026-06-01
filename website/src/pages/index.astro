@@ -1,20 +1,13 @@
 ---
 import BaseLayout from "../layouts/base-layout.astro";
-import BackupSection from "../components/backup-section.astro";
-import FeatureGrid from "../components/feature-grid.astro";
 import HeroSection from "../components/hero-section.astro";
-import InstallCard from "../components/install-card.astro";
-import SiteFooter from "../components/site-footer.astro";
-import SiteHeader from "../components/site-header.astro";
 ---
 
-<BaseLayout>
-  <SiteHeader />
+<BaseLayout
+  title="Aeroplane - Self-hosted deployment control plane"
+  description="Aeroplane turns a VPS into a deployment control plane for apps, databases, domains, logs, and backups."
+>
   <main>
     <HeroSection />
-    <InstallCard />
-    <FeatureGrid />
-    <BackupSection />
   </main>
-  <SiteFooter />
 </BaseLayout>
