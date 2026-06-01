@@ -24,7 +24,14 @@ import { getRailwayProjects, getRailwayProjectDetails, importRailwayProject } fr
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
 import { branchFromGitRef, verifyGitHubSignature } from "./github.js";
 import { subscribeToDeploymentLogs } from "./logBus.js";
-import { buildDatabaseConnectionUrl, databaseTypeForService, isDatabaseService, publicDatabaseUrlKey, publicDatabaseUrlKeys } from "./database-urls.js";
+import {
+  buildDatabaseConnectionUrl,
+  databaseTypeForService,
+  generateDatabaseHostname,
+  isDatabaseService,
+  publicDatabaseUrlKey,
+  publicDatabaseUrlKeys
+} from "./database-urls.js";
 import {
   deploymentLogs,
   deployments,
@@ -76,6 +83,7 @@ import {
 import { createMigrationBundle, importMigrationBundle } from "./migration-bundle.js";
 import { importPostgresDataFromRailway, importPostgresDataFromUrl } from "./postgres-data-import.js";
 import { listServiceImportSources } from "./service-import-sources.js";
+import { checkPostgresTlsActive, ensurePostgresTlsAssets, getPostgresTlsInfo } from "./postgres-tls.js";
 
 const app = new Hono();
 
@@ -118,7 +126,7 @@ const serviceSettingsSchema = z.object({
   startCommand: optionalString,
   staticOutput: optionalString,
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
-  databasePublicEnabled: z.boolean().optional().default(false),
+  databasePublicEnabled: z.boolean().optional().default(true),
   databasePublicHostname: publicHostnameSchema
 });
 
@@ -414,7 +422,9 @@ function urlForHostname(hostname: string) {
 }
 
 async function publicService(service: Service) {
-  const isDatabase = isDatabaseService(service);
+  const normalizedService = ensureDatabasePublicDefaults(service) ?? service;
+  const isDatabase = isDatabaseService(normalizedService);
+  service = normalizedService;
   const appPort = service.activePort ?? service.hostPort;
   const localUrl = isDatabase ? "" : `http://127.0.0.1:${appPort}`;
   const latestDeployment = db
@@ -505,6 +515,9 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
   const repoFullName = input.repoFullName ?? null;
   const repoUrl = input.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
   const isDatabase = repoUrl === "database" || (repoFullName?.startsWith("database:") ?? false);
+  const databasePublicHostname = isDatabase
+    ? input.databasePublicHostname ?? defaultDatabasePublicHostname(serviceSlug)
+    : null;
 
   const service: Service = {
     id: nanoid(10),
@@ -524,8 +537,8 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
     internalPort: input.internalPort,
     hostPort: allocateHostPort(),
     activePort: null,
-    databasePublicEnabled: isDatabase ? input.databasePublicEnabled : false,
-    databasePublicHostname: isDatabase && input.databasePublicEnabled ? input.databasePublicHostname ?? null : null,
+    databasePublicEnabled: isDatabase,
+    databasePublicHostname,
     status: "idle",
     lastDeployedAt: null,
     createdAt: timestamp,
@@ -562,13 +575,12 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
 }
 
 function syncDatabaseUrlEnvVar(serviceId: string) {
-  const service = getServiceById(serviceId);
+  const service = ensureDatabasePublicDefaults(getServiceById(serviceId));
   if (!service) return;
   if (!isDatabaseService(service)) return;
 
   const dbType = databaseTypeForService(service);
-  const envs = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
-  const envMap = new Map(envs.map(row => [row.key, row.value]));
+  const envMap = envMapForService(serviceId);
   const privateUrl = buildDatabaseConnectionUrl({
     dbType,
     envMap,
@@ -629,6 +641,38 @@ function syncDatabaseUrlEnvVar(serviceId: string) {
       db.delete(envVars).where(and(eq(envVars.serviceId, serviceId), eq(envVars.key, key))).run();
     }
   }
+}
+
+function envMapForService(serviceId: string) {
+  const envs = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
+  return new Map(envs.map((row) => [row.key, row.value]));
+}
+
+function defaultDatabasePublicHostname(serviceSlug: string) {
+  return generateDatabaseHostname(serviceSlug, getSystemSettings().rootDomain) || null;
+}
+
+function ensureDatabasePublicDefaults(service: Service | undefined) {
+  if (!service || !isDatabaseService(service)) return service ?? null;
+
+  const nextHostname = service.databasePublicHostname ?? defaultDatabasePublicHostname(service.slug);
+  if (service.databasePublicEnabled && service.databasePublicHostname === nextHostname) return service;
+
+  const updated = {
+    ...service,
+    databasePublicEnabled: true,
+    databasePublicHostname: nextHostname,
+    updatedAt: nowIso()
+  };
+  db.update(services)
+    .set({
+      databasePublicEnabled: updated.databasePublicEnabled,
+      databasePublicHostname: updated.databasePublicHostname,
+      updatedAt: updated.updatedAt
+    })
+    .where(eq(services.id, service.id))
+    .run();
+  return updated;
 }
 
 function syncAllExistingDatabaseUrls() {
@@ -1000,6 +1044,7 @@ app.post("/api/system/settings", async (c) => {
   if (rootDomain) {
     ensureDefaultDomainsForExistingServices(rootDomain);
   }
+  syncAllExistingDatabaseUrls();
   const caddy = await writeAndReloadCaddy();
   return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname }, caddy });
 });
@@ -1244,10 +1289,6 @@ app.post("/api/projects/:projectId/services", async (c) => {
 
   const repoFullName = body.data.repoFullName ?? null;
   const repoUrl = body.data.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
-  if (isDatabaseService({ repoUrl, repoFullName }) && body.data.databasePublicEnabled && !body.data.databasePublicHostname) {
-    return jsonError("Public database hostname is required");
-  }
-
   const service = createServiceRecord(project.id, body.data);
   db.update(projectGroups).set({ updatedAt: nowIso() }).where(eq(projectGroups.id, project.id)).run();
   await writeAndReloadCaddy();
@@ -1543,6 +1584,47 @@ app.get("/api/services/:serviceId/database/backups/:backupId/download", (c) => {
   }
 });
 
+app.get("/api/services/:serviceId/database/tls", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service || !isDatabaseService(service)) {
+    return jsonError("Database service not found", 404);
+  }
+  if (databaseTypeForService(service) !== "postgres") {
+    return jsonError("Postgres TLS setup is only available for Postgres services.", 400);
+  }
+
+  try {
+    const envMap = envMapForService(service.id);
+    await ensurePostgresTlsAssets(service);
+    const active = await checkPostgresTlsActive(service, envMap, containerNameForService(service.id));
+    return c.json({ tls: getPostgresTlsInfo(service, envMap, active) });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not load Postgres TLS setup", 400);
+  }
+});
+
+app.get("/api/services/:serviceId/database/tls/ca", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service || !isDatabaseService(service)) {
+    return jsonError("Database service not found", 404);
+  }
+  if (databaseTypeForService(service) !== "postgres") {
+    return jsonError("Postgres TLS setup is only available for Postgres services.", 400);
+  }
+
+  try {
+    const assets = await ensurePostgresTlsAssets(service);
+    return new Response(readFileSync(assets.caCertPath), {
+      headers: {
+        "Content-Disposition": `attachment; filename="${service.slug}-postgres-ca.pem"`,
+        "Content-Type": "application/x-pem-file"
+      }
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not download Postgres CA", 400);
+  }
+});
+
 app.delete("/api/services/:serviceId/database/backups/:backupId", async (c) => {
   try {
     return c.json(await deleteDatabaseBackup(c.req.param("serviceId"), c.req.param("backupId")));
@@ -1604,16 +1686,10 @@ app.patch("/api/services/:serviceId", async (c) => {
         : service.repoUrl
       : body.data.repoUrl ?? service.repoUrl;
   const nextIsDatabase = isDatabaseService({ repoFullName, repoUrl });
-  const databasePublicEnabled = nextIsDatabase
-    ? body.data.databasePublicEnabled ?? service.databasePublicEnabled
-    : false;
-  const databasePublicHostname = nextIsDatabase && databasePublicEnabled
-    ? body.data.databasePublicHostname ?? service.databasePublicHostname
+  const databasePublicEnabled = nextIsDatabase;
+  const databasePublicHostname = nextIsDatabase
+    ? body.data.databasePublicHostname ?? service.databasePublicHostname ?? defaultDatabasePublicHostname(service.slug)
     : null;
-
-  if (nextIsDatabase && databasePublicEnabled && !databasePublicHostname) {
-    return jsonError("Public database hostname is required");
-  }
 
   db.update(services)
     .set({
