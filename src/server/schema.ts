@@ -79,6 +79,7 @@ export const databaseBackups = sqliteTable("database_backups", {
   serviceId: text("project_id").notNull(),
   engine: text("engine").notNull(),
   status: text("status").notNull(),
+  trigger: text("trigger").notNull().default("manual"),
   storage: text("storage").notNull(),
   format: text("format").notNull(),
   localPath: text("local_path"),
@@ -89,6 +90,14 @@ export const databaseBackups = sqliteTable("database_backups", {
   createdAt: text("created_at").notNull(),
   startedAt: text("started_at"),
   finishedAt: text("finished_at")
+});
+
+export const databaseBackupSettings = sqliteTable("database_backup_settings", {
+  serviceId: text("project_id").primaryKey(),
+  storage: text("storage").notNull(),
+  automaticEnabled: integer("automatic_enabled", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
 });
 
 export const serviceImportSources = sqliteTable("service_import_sources", {
@@ -135,5 +144,6 @@ export type ServiceImportSource = typeof serviceImportSources.$inferSelect;
 export type EnvVar = typeof envVars.$inferSelect;
 export type Domain = typeof domains.$inferSelect;
 export type DatabaseBackup = typeof databaseBackups.$inferSelect;
+export type DatabaseBackupSettings = typeof databaseBackupSettings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type AuthSession = typeof authSessions.$inferSelect;
