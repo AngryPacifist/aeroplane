@@ -463,18 +463,28 @@ export type GitHubSettingsStatus = {
 };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {})
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options?.headers ?? {})
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Network request failed";
+    if (/failed to fetch|networkerror|load failed/i.test(message)) {
+      throw new Error(`Could not reach the Aeroplane API at ${path}. Check that your domain/proxy forwards /api requests to Aeroplane, then try again.`);
     }
-  });
+    throw new Error(message);
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((payload as { error?: string }).error ?? "Request failed");
+    const detail = (payload as { error?: string }).error;
+    throw new Error(detail ?? `Request failed with HTTP ${response.status}`);
   }
 
   return payload as T;
