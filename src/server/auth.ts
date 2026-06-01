@@ -207,6 +207,7 @@ function isPublicApiPath(pathname: string) {
     pathname === "/api/auth/setup" ||
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/logout" ||
+    pathname === "/api/github/status" ||
     pathname === "/api/github/app/webhook"
   );
 }
