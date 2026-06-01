@@ -7,7 +7,8 @@ import {
   PencilEdit02Icon,
   Delete02Icon,
   CheckmarkCircle02Icon,
-  Cancel01Icon
+  Cancel01Icon,
+  InformationCircleIcon
 } from "@hugeicons/core-free-icons";
 import { AppIcon, FormInput, shellButton } from "../ui/primitives";
 import { AutocompleteInput } from "../ui/autocomplete-input";
@@ -20,6 +21,15 @@ interface EnvVarRowProps {
   busy: boolean;
   suggestions: Array<{ key: string; label: string }>;
 }
+
+const publicDatabaseUrlKeys = new Set([
+  "DATABASE_PUBLIC_URL",
+  "POSTGRES_PUBLIC_URL",
+  "MYSQL_PUBLIC_URL",
+  "REDIS_PUBLIC_URL",
+  "MONGODB_PUBLIC_URL",
+  "CLICKHOUSE_PUBLIC_URL"
+]);
 
 export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarRowProps) {
   const [editing, setEditing] = useState(false);
@@ -57,6 +67,8 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
   }
 
   const hasReference = !!(item.resolvedValue && item.resolvedValue !== item.value);
+  const publicDatabaseUrlHint = "Use this if you need to connect to this database outside this server.";
+  const isPublicDatabaseUrl = publicDatabaseUrlKeys.has(item.key);
 
   if (editing) {
     return (
@@ -146,6 +158,11 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
           <span className="truncate font-mono text-[15px] uppercase tracking-[0.06em] text-zinc-100 font-medium">
             {item.key}
           </span>
+          {isPublicDatabaseUrl ? (
+            <span className="shrink-0 text-zinc-500" title={publicDatabaseUrlHint} aria-label={publicDatabaseUrlHint}>
+              <AppIcon icon={InformationCircleIcon} size={15} />
+            </span>
+          ) : null}
         </div>
 
         <div className="relative flex items-center">
