@@ -77,6 +77,7 @@ type MigrationManifest = {
   files: {
     staticSites: boolean;
     backups: boolean;
+    postgresTls: boolean;
     caddyfile: boolean;
   };
 };
@@ -253,6 +254,7 @@ async function writePayload(payloadDir: string) {
   const files = {
     staticSites: copyOptionalDir(join(dataDir, "static-sites"), join(filesDir, "static-sites")),
     backups: copyOptionalDir(join(dataDir, "backups"), join(filesDir, "backups")),
+    postgresTls: copyOptionalDir(join(dataDir, "postgres-tls"), join(filesDir, "postgres-tls")),
     caddyfile: copyOptionalFile(caddyConfigPath, join(filesDir, "Caddyfile"))
   };
 
@@ -309,6 +311,7 @@ function restorePayloadFiles(payloadDir: string) {
   const dataDir = currentDataDir();
   copyOptionalDir(join(filesDir, "static-sites"), join(dataDir, "static-sites"));
   copyOptionalDir(join(filesDir, "backups"), join(dataDir, "backups"));
+  copyOptionalDir(join(filesDir, "postgres-tls"), join(dataDir, "postgres-tls"));
 
   const importedCaddyfile = join(filesDir, "Caddyfile");
   const caddyConfigPath = resolve(process.env.CADDY_CONFIG_PATH ?? config.caddyConfigPath);
