@@ -10,6 +10,16 @@ type R2RequestOptions = {
   contentType?: string;
 };
 
+export class R2RequestError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code: string
+  ) {
+    super(message);
+  }
+}
+
 function sha256Hex(value: Buffer | string) {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -35,6 +45,34 @@ function canonicalPath(bucket: string, key?: string) {
   const bucketPath = encodePathSegment(bucket);
   if (!key) return `/${bucketPath}`;
   return `/${bucketPath}/${key.split("/").map(encodePathSegment).join("/")}`;
+}
+
+function extractR2ErrorDetail(status: number, text: string) {
+  const code = text.match(/<Code>([^<]+)<\/Code>/i)?.[1] ?? "";
+  const message = text.match(/<Message>([^<]+)<\/Message>/i)?.[1] ?? "";
+  const compact = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (status === 401 || code === "InvalidAccessKeyId" || code === "SignatureDoesNotMatch") {
+    return {
+      code: code || "Unauthorized",
+      message: "Cloudflare R2 rejected the credentials. Check the account ID, access key ID, secret access key, and R2 token permissions."
+    };
+  }
+  if (status === 403) {
+    return {
+      code: code || "Forbidden",
+      message: message || "Cloudflare R2 denied access. Check that the token can read/write this bucket."
+    };
+  }
+  if (status === 404) {
+    return {
+      code: code || "NotFound",
+      message: message || "Cloudflare R2 bucket was not found."
+    };
+  }
+  return {
+    code: code || `HTTP_${status}`,
+    message: message || compact || `R2 request failed with ${status}`
+  };
 }
 
 function signingKey(secret: string, date: string) {
@@ -88,8 +126,8 @@ async function signedR2Request(settings: R2Settings, options: R2RequestOptions) 
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    const detail = text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    throw new Error(detail || `R2 request failed with ${response.status}`);
+    const detail = extractR2ErrorDetail(response.status, text);
+    throw new R2RequestError(detail.message, response.status, detail.code);
   }
 
   return response;
@@ -98,7 +136,10 @@ async function signedR2Request(settings: R2Settings, options: R2RequestOptions) 
 export async function ensureR2Bucket(settings: R2Settings) {
   try {
     await signedR2Request(settings, { method: "HEAD", bucket: settings.bucket });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof R2RequestError) || error.status !== 404) {
+      throw error;
+    }
     await signedR2Request(settings, { method: "PUT", bucket: settings.bucket });
   }
 }
