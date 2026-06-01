@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { config } from "./config.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
+import {
+  databaseDataVolumeArg,
+  databaseImage
+} from "./database-runtime.js";
+import { ensureStableDatabaseDataVolume, type BufferedDockerResult } from "./database-volume-adoption.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { db } from "./db.js";
 import { runDockerExec } from "./database-viewer-shared.js";
@@ -24,15 +29,6 @@ export type MigrationDatabaseDump = {
   checksum: string;
 };
 
-function databaseImage(dbType: string) {
-  if (dbType === "postgres") return "postgres:18-alpine";
-  if (dbType === "mysql") return "mysql:8";
-  if (dbType === "redis") return "redis:7-alpine";
-  if (dbType === "mongodb" || dbType === "mongo") return "mongo:6";
-  if (dbType === "clickhouse") return "clickhouse/clickhouse-server:latest";
-  return "postgres:18-alpine";
-}
-
 function runDocker(args: string[]) {
   return new Promise<void>((resolvePromise, reject) => {
     const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -52,6 +48,27 @@ function runDocker(args: string[]) {
       } else {
         reject(new Error((stderr || stdout || "Docker command failed").trim()));
       }
+    });
+  });
+}
+
+function runBufferedDocker(args: string[]) {
+  return new Promise<BufferedDockerResult>((resolvePromise) => {
+    const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolvePromise({ code: 1, stdout, stderr: stderr || error.message });
+    });
+    child.on("close", (code) => {
+      resolvePromise({ code, stdout, stderr });
     });
   });
 }
@@ -112,6 +129,7 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
     `${bindHost}:${service.hostPort}:${service.internalPort}`
   ];
 
+  dockerArgs.push("-v", databaseDataVolumeArg(service.id, dbType));
   if (postgresTlsAssets) {
     dockerArgs.push("-v", postgresTlsVolumeArg(postgresTlsAssets));
   }
@@ -139,6 +157,13 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
     }
   }
   await ensureRuntimeNetwork();
+  await ensureStableDatabaseDataVolume({
+    service,
+    dbType,
+    existingContainerName: containerName,
+    runDocker,
+    runBufferedDocker
+  });
   await runDocker(["rm", "-f", containerName]).catch(() => undefined);
   await runDocker(dockerArgs);
 }
