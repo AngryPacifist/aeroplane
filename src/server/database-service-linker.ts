@@ -4,9 +4,14 @@ import { buildDatabaseConnectionUrl, databaseTypeForService, isDatabaseService }
 import { db, nowIso } from "./db.js";
 import { envVars, services } from "./schema.js";
 
-type DatabaseUrlMatch = {
+export type DatabaseConnectionEnvSuggestion = {
   key: string;
   value: string;
+  label: string;
+  serviceId: string;
+  serviceName: string;
+  serviceSlug: string;
+  dbType: string;
 };
 
 function upsertEnvVar(serviceId: string, key: string, value: string, timestamp = nowIso()) {
@@ -26,22 +31,6 @@ function upsertEnvVar(serviceId: string, key: string, value: string, timestamp =
     .run();
 }
 
-function shouldReplaceDatabaseUrl(value: string | undefined) {
-  if (value === undefined) return true;
-
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (trimmed.includes("${")) return true;
-
-  const lower = trimmed.toLowerCase();
-  return (
-    lower.includes("railway") ||
-    lower.includes("rlwy") ||
-    lower.includes("127.0.0.1") ||
-    lower.includes("localhost")
-  );
-}
-
 function mapEnvRows(serviceIds: string[]) {
   const envsByServiceId = new Map<string, Map<string, string>>();
   for (const serviceId of serviceIds) {
@@ -59,6 +48,50 @@ function mapEnvRows(serviceIds: string[]) {
   return envsByServiceId;
 }
 
+function databaseConnectionSuggestionKeys(dbType: string, primaryKey: string) {
+  if (primaryKey !== "DATABASE_URL") return [primaryKey];
+  if (dbType === "postgres") return [primaryKey, "DB_URL", "POSTGRES_URL"];
+  if (dbType === "mysql") return [primaryKey, "DB_URL", "MYSQL_URL"];
+  return [primaryKey, "DB_URL"];
+}
+
+export function databaseConnectionEnvSuggestionsForService(serviceId: string) {
+  const service = db.select().from(services).where(eq(services.id, serviceId)).get();
+  if (!service) return [];
+
+  const projectServices = db.select().from(services).where(eq(services.projectId, service.projectId)).all();
+  const databaseServices = projectServices.filter((projectService) => projectService.id !== service.id && isDatabaseService(projectService));
+  if (databaseServices.length === 0) return [];
+
+  const envsByServiceId = mapEnvRows(databaseServices.map((databaseService) => databaseService.id));
+  const suggestions: DatabaseConnectionEnvSuggestion[] = [];
+
+  for (const databaseService of databaseServices) {
+    const dbType = databaseTypeForService(databaseService);
+    const envMap = envsByServiceId.get(databaseService.id) ?? new Map<string, string>();
+    const connectionUrl = buildDatabaseConnectionUrl({
+      dbType,
+      envMap,
+      host: databaseService.slug,
+      port: databaseService.internalPort
+    });
+
+    for (const key of databaseConnectionSuggestionKeys(dbType, connectionUrl.key)) {
+      suggestions.push({
+        key,
+        value: connectionUrl.value,
+        label: `${databaseService.name} ${dbType} connection`,
+        serviceId: databaseService.id,
+        serviceName: databaseService.name,
+        serviceSlug: databaseService.slug,
+        dbType
+      });
+    }
+  }
+
+  return suggestions;
+}
+
 export function syncProjectDatabaseConnectionEnv(projectId: string) {
   const projectServices = db.select().from(services).where(eq(services.projectId, projectId)).all();
   const databaseServices = projectServices.filter((service) => isDatabaseService(service));
@@ -69,7 +102,7 @@ export function syncProjectDatabaseConnectionEnv(projectId: string) {
   const timestamp = nowIso();
   const serviceIds = projectServices.map((service) => service.id);
   const envsByServiceId = mapEnvRows(serviceIds);
-  const urlsByKey = new Map<string, DatabaseUrlMatch[]>();
+  let synced = 0;
 
   for (const databaseService of databaseServices) {
     const dbType = databaseTypeForService(databaseService);
@@ -84,33 +117,9 @@ export function syncProjectDatabaseConnectionEnv(projectId: string) {
     if (envMap.get(connectionUrl.key) !== connectionUrl.value) {
       upsertEnvVar(databaseService.id, connectionUrl.key, connectionUrl.value, timestamp);
       envMap.set(connectionUrl.key, connectionUrl.value);
-    }
-
-    const matches = urlsByKey.get(connectionUrl.key) ?? [];
-    matches.push({
-      key: connectionUrl.key,
-      value: connectionUrl.value
-    });
-    urlsByKey.set(connectionUrl.key, matches);
-  }
-
-  const unambiguousUrls = Array.from(urlsByKey.values())
-    .filter((matches) => matches.length === 1)
-    .map((matches) => matches[0]);
-
-  let linked = 0;
-  for (const service of projectServices) {
-    if (isDatabaseService(service)) continue;
-
-    const serviceEnv = envsByServiceId.get(service.id) ?? new Map<string, string>();
-    for (const match of unambiguousUrls) {
-      if (!shouldReplaceDatabaseUrl(serviceEnv.get(match.key))) continue;
-
-      upsertEnvVar(service.id, match.key, match.value, timestamp);
-      serviceEnv.set(match.key, match.value);
-      linked += 1;
+      synced += 1;
     }
   }
 
-  return { linked };
+  return { linked: 0, synced };
 }
