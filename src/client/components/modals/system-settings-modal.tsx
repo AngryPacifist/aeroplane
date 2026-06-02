@@ -1,6 +1,7 @@
-import { CloudUploadIcon, DatabaseExportIcon, GithubIcon, Globe02Icon, HardDriveIcon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { CloudUploadIcon, DatabaseExportIcon, GithubIcon, Globe02Icon, HardDriveIcon, Queue02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { AppIcon, SectionTitle, shellButton, surfaceClass } from "../ui/primitives";
 import { ControlPlaneDomainSettingsPanel } from "./control-plane-domain-settings-panel";
+import { DeploymentSettingsPanel } from "./deployment-settings-panel";
 import { GitHubSettingsPanel } from "./github-settings-panel";
 import { MaintenanceSettingsPanel } from "./maintenance-settings-panel";
 import { MigrationSettingsPanel } from "./migration-settings-panel";
@@ -15,6 +16,7 @@ const settingsTabs: Array<{ id: SystemSettingsTab; label: string; icon: unknown 
   { id: "storage", label: "Storage", icon: CloudUploadIcon },
   { id: "migration", label: "Migration", icon: DatabaseExportIcon },
   { id: "maintenance", label: "Maintenance", icon: HardDriveIcon },
+  { id: "deployments", label: "Deployments", icon: Queue02Icon },
   { id: "updates", label: "Updates", icon: Refresh03Icon }
 ];
 
@@ -89,6 +91,7 @@ export function SystemSettingsModal({
                 {activeTab === "storage" ? <R2StorageSettingsPanel open={open} /> : null}
                 {activeTab === "migration" ? <MigrationSettingsPanel /> : null}
                 {activeTab === "maintenance" ? <MaintenanceSettingsPanel open={open} /> : null}
+                {activeTab === "deployments" ? <DeploymentSettingsPanel open={open} /> : null}
                 {activeTab === "updates" ? <UpdatesSettingsPanel open={open} /> : null}
               </div>
             </div>
