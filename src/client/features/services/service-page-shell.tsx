@@ -18,7 +18,6 @@ import {
 import { FormEvent, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
-  type DatabaseVariableSuggestion,
   type DeploymentLog,
   type GitHubDirectory,
   type GitHubRepo,
@@ -91,7 +90,6 @@ export function ServicePageShell({
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLog[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLog[]>([]);
   const [suggestions, setSuggestions] = useState<Array<{ key: string; label: string }>>([]);
-  const [databaseVariableSuggestions, setDatabaseVariableSuggestions] = useState<DatabaseVariableSuggestion[]>([]);
   const [settings, setSettings] = useState({
     name: "",
     repoFullName: "",
@@ -131,7 +129,6 @@ export function ServicePageShell({
       startTransition(() => {
         setOverview(result);
         setSuggestions(suggs.suggestions);
-        setDatabaseVariableSuggestions(suggs.databaseVariables);
         setActiveDeploymentId((current) => current ?? result.deployments[0]?.id ?? null);
         setSettings({
           name: result.service.name,
@@ -523,7 +520,6 @@ export function ServicePageShell({
                   serviceId={serviceId}
                   env={env}
                   suggestions={suggestions}
-                  databaseVariableSuggestions={databaseVariableSuggestions}
                   busy={busy}
                   doAction={doAction}
                 />
