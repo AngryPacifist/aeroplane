@@ -1,7 +1,11 @@
 ---
 import BaseLayout from "../layouts/base-layout.astro";
 import ControlPlaneSection from "../components/control-plane-section.astro";
+import DeployAnythingSection from "../components/deploy-anything-section.astro";
+import FreeToUseSection from "../components/free-to-use-section.astro";
+import GithubStarSection from "../components/github-star-section.astro";
 import HeroSection from "../components/hero-section.astro";
+import SiteFooter from "../components/site-footer.astro";
 ---
 
 <BaseLayout
@@ -11,5 +15,9 @@ import HeroSection from "../components/hero-section.astro";
   <main>
     <HeroSection />
     <ControlPlaneSection />
+    <DeployAnythingSection />
+    <FreeToUseSection />
+    <GithubStarSection />
   </main>
+  <SiteFooter />
 </BaseLayout>
