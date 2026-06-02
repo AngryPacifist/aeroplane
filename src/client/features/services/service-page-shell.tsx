@@ -18,6 +18,7 @@ import {
 import { FormEvent, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
+  type DatabaseVariableSuggestion,
   type DeploymentLog,
   type GitHubDirectory,
   type GitHubRepo,
@@ -90,6 +91,7 @@ export function ServicePageShell({
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLog[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLog[]>([]);
   const [suggestions, setSuggestions] = useState<Array<{ key: string; label: string }>>([]);
+  const [databaseVariableSuggestions, setDatabaseVariableSuggestions] = useState<DatabaseVariableSuggestion[]>([]);
   const [settings, setSettings] = useState({
     name: "",
     repoFullName: "",
@@ -124,11 +126,12 @@ export function ServicePageShell({
     try {
       const [result, suggs] = await Promise.all([
         api.serviceOverview(serviceId),
-        api.suggestionKeys(serviceId).catch(() => ({ suggestions: [] }))
+        api.suggestionKeys(serviceId).catch(() => ({ suggestions: [], databaseVariables: [] }))
       ]);
       startTransition(() => {
         setOverview(result);
         setSuggestions(suggs.suggestions);
+        setDatabaseVariableSuggestions(suggs.databaseVariables);
         setActiveDeploymentId((current) => current ?? result.deployments[0]?.id ?? null);
         setSettings({
           name: result.service.name,
@@ -516,7 +519,14 @@ export function ServicePageShell({
               {selectedTab === "backups" && isDatabase ? <DatabaseBackupsPanel serviceId={serviceId} /> : null}
 
               {selectedTab === "environment" ? (
-                <ServiceVariablesPanel serviceId={serviceId} env={env} suggestions={suggestions} busy={busy} doAction={doAction} />
+                <ServiceVariablesPanel
+                  serviceId={serviceId}
+                  env={env}
+                  suggestions={suggestions}
+                  databaseVariableSuggestions={databaseVariableSuggestions}
+                  busy={busy}
+                  doAction={doAction}
+                />
               ) : null}
 
               {selectedTab === "domains" && !isDatabase ? (
