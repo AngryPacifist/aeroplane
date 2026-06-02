@@ -11,7 +11,6 @@ import {
   LeftToRightListStarIcon,
   VariableIcon,
   VideoConsoleIcon,
-  CloudServerIcon,
   DashboardSquare02Icon,
   DatabaseExportIcon
 } from "@hugeicons/core-free-icons";
@@ -47,6 +46,7 @@ import { ServiceDomainsPanel } from "./service-domains-panel";
 import { ServiceVariablesPanel } from "./service-variables-panel";
 import { formatBuildDuration } from "./service-format";
 import { RuntimeLogsPanel } from "./service-log-panels";
+import { ServiceOverviewPanel } from "./service-overview-panel";
 import type { ServiceTab } from "./service-tabs";
 
 function textOrNull(value: string) {
@@ -480,15 +480,22 @@ export function ServicePageShell({
 
             <div className={contentClass}>
               {selectedTab === "overview" ? (
-                <div className="flex min-h-[360px] items-center justify-center border border-dashed border-zinc-800 bg-zinc-950/35 p-8 text-center">
-                  <div>
-                    <div className="mx-auto grid h-12 w-12 place-items-center border border-zinc-800 bg-zinc-900 text-zinc-500">
-                      <AppIcon icon={CloudServerIcon} size={20} />
-                    </div>
-                    <h3 className="mt-4 font-hero text-xl text-zinc-100">Overview</h3>
-                    <p className="mt-2 max-w-md text-sm leading-6 text-zinc-500">This page is ready for service summary content.</p>
-                  </div>
-                </div>
+                service ? (
+                  <ServiceOverviewPanel
+                    service={service}
+                    deployments={deployments}
+                    env={env}
+                    domains={domains}
+                    pageServices={pageServices}
+                    publicIp={overview?.publicIp}
+                    isDatabase={isDatabase}
+                    databaseEngine={databaseEngine}
+                    busy={busy}
+                    nowMs={nowMs}
+                    onDeploy={() => void doAction("deploy", async () => void api.createDeployment(serviceId))}
+                    onTabChange={onTabChange}
+                  />
+                ) : null
               ) : null}
 
               {selectedTab === "deployments" ? (
