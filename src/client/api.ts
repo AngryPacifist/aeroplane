@@ -278,12 +278,20 @@ export type EnvVar = {
 
 export type DatabaseVariableSuggestion = {
   key: string;
+  sourceKey: string;
   value: string;
   label: string;
   serviceId: string;
   serviceName: string;
   serviceSlug: string;
   dbType: string;
+};
+
+export type EnvExampleVariableSuggestion = {
+  key: string;
+  value: string;
+  label: string;
+  sourcePath: string;
 };
 
 export type Domain = {
@@ -546,6 +554,12 @@ export const api = {
     request<{ project: ProjectDetail }>(`/api/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(body) }),
   createService: (projectId: string, body: unknown) =>
     request<{ service: Service }>(`/api/projects/${projectId}/services`, { method: "POST", body: JSON.stringify(body) }),
+  projectDatabaseVariableSuggestions: (projectId: string) =>
+    request<{ suggestions: DatabaseVariableSuggestion[] }>(`/api/projects/${projectId}/database-variable-suggestions`),
+  projectEnvExampleVariableSuggestions: (projectId: string, params: { repoFullName: string; branch: string; rootDir?: string | null }) =>
+    request<{ suggestions: EnvExampleVariableSuggestion[] }>(
+      `/api/projects/${projectId}/env-example-variable-suggestions?repo=${encodeURIComponent(params.repoFullName)}&branch=${encodeURIComponent(params.branch)}&rootDir=${encodeURIComponent(params.rootDir ?? "")}`
+    ),
   deleteProject: (projectId: string) => request(`/api/projects/${projectId}`, { method: "DELETE" }),
   serviceOverview: (serviceId: string) => request<ServiceOverview>(`/api/services/${serviceId}/overview`),
   updateService: (serviceId: string, body: unknown) =>
