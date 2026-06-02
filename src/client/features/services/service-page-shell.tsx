@@ -49,6 +49,11 @@ import { formatBuildDuration } from "./service-format";
 import { RuntimeLogsPanel } from "./service-log-panels";
 import type { ServiceTab } from "./service-tabs";
 
+function textOrNull(value: string) {
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 const serviceTabLabels: Record<ServiceTab, string> = {
   overview: "Overview",
   deployments: "Deployments",
@@ -354,11 +359,11 @@ export function ServicePageShell({
         repoFullName: isDatabase ? settings.repoFullName : (settings.repoFullName.trim() ? settings.repoFullName : null),
         repoUrl: isDatabase ? undefined : (settings.repoFullName.trim() ? undefined : settings.repoUrl.trim() || undefined),
         branch: settings.branch,
-        rootDir: isDatabase ? undefined : (settings.rootDir || undefined),
-        installCommand: isDatabase ? undefined : (settings.installCommand || undefined),
-        buildCommand: isDatabase ? undefined : (settings.buildCommand || undefined),
-        startCommand: isDatabase ? undefined : (settings.startCommand || undefined),
-        staticOutput: isDatabase ? undefined : (settings.staticOutput || undefined),
+        rootDir: isDatabase ? undefined : textOrNull(settings.rootDir),
+        installCommand: isDatabase ? undefined : textOrNull(settings.installCommand),
+        buildCommand: isDatabase ? undefined : textOrNull(settings.buildCommand),
+        startCommand: isDatabase ? undefined : textOrNull(settings.startCommand),
+        staticOutput: isDatabase ? undefined : textOrNull(settings.staticOutput),
         internalPort: Number(settings.internalPort),
         databasePublicEnabled: isDatabase ? true : undefined,
         databasePublicHostname: isDatabase ? settings.databasePublicHostname || undefined : undefined
