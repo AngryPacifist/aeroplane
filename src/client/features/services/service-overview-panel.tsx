@@ -4,12 +4,9 @@ import {
   Clock01Icon,
   DatabaseIcon,
   GithubIcon,
-  Globe02Icon,
-  LinkSquare02Icon,
   PackageIcon,
   Settings01Icon,
   VariableIcon,
-  WorkflowSquare07Icon
 } from "@hugeicons/core-free-icons";
 import type { Deployment, Domain, EnvVar, Service } from "../../api";
 import { AppIcon, FrameworkMark, StatusPill, shellButton } from "../../components/ui/primitives";
@@ -23,7 +20,6 @@ type ServiceOverviewPanelProps = {
   env: EnvVar[];
   domains: Domain[];
   pageServices: Service[];
-  publicIp?: string;
   isDatabase: boolean;
   databaseEngine: string;
   busy: string;
@@ -129,7 +125,6 @@ export function ServiceOverviewPanel({
   env,
   domains,
   pageServices,
-  publicIp,
   isDatabase,
   databaseEngine,
   busy,
@@ -142,10 +137,7 @@ export function ServiceOverviewPanel({
   const latestDuration = latestDeployment
     ? formatBuildDuration(latestDeployment.startedAt ?? latestDeployment.createdAt, latestDeployment.finishedAt, nowMs)
     : null;
-  const primaryUrl = service.primaryUrl || service.localUrl;
   const rootDir = service.rootDir || ".";
-  const activeDomains = domains.filter((domain) => domain.status === "active").length;
-  const pendingDomains = domains.length - activeDomains;
   const warnings = warningItems({ service, deployments, env, domains, isDatabase });
   const linkedSlugs = linkedServiceSlugs(env);
   const linkedServices = pageServices.filter((candidate) => candidate.id !== service.id && linkedSlugs.has(candidate.slug));
@@ -177,27 +169,6 @@ export function ServiceOverviewPanel({
               <OverviewStat label={isDatabase ? "Engine" : "App port"} value={isDatabase ? databaseEngine || "database" : String(service.internalPort)} meta={isDatabase ? `Internal ${service.internalPort}` : `Host ${service.hostPort}`} />
             </div>
           </div>
-
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button type="button" className={shellButton("primary")} onClick={onDeploy} disabled={busy === "deploy"}>
-              <AppIcon icon={PackageIcon} size={15} />
-              Deploy
-            </button>
-            {primaryUrl ? (
-              <a className={shellButton("secondary")} href={primaryUrl} target="_blank" rel="noreferrer">
-                <AppIcon icon={LinkSquare02Icon} size={15} />
-                Open
-              </a>
-            ) : null}
-            <button type="button" className={shellButton("secondary")} onClick={() => onTabChange("logs")}>
-              <AppIcon icon={WorkflowSquare07Icon} size={15} />
-              Logs
-            </button>
-            <button type="button" className={shellButton("ghost")} onClick={() => onTabChange("settings")}>
-              <AppIcon icon={Settings01Icon} size={15} />
-              Settings
-            </button>
-          </div>
         </div>
       </section>
 
@@ -222,51 +193,30 @@ export function ServiceOverviewPanel({
         </section>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <section className="border border-zinc-800 bg-zinc-950/45 p-5">
-          <SectionHeader icon={PackageIcon} title="Latest Deployment" meta={latestStatus} />
-          {latestDeployment ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <OverviewStat label="Status" value={latestStatus} meta={latestDeployment.trigger} />
-                <OverviewStat label="Commit" value={shortSha(latestDeployment.commitSha)} meta={latestDeployment.imageTag ?? "image pending"} />
-                <OverviewStat label="Duration" value={latestDuration ?? "Unknown"} meta={formatTime(latestDeployment.createdAt)} />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className={shellButton("secondary")} onClick={() => onTabChange("deployments")}>
-                  View deploy output
-                </button>
-                {latestDeployment.status === "failed" ? (
-                  <button type="button" className={shellButton("primary")} onClick={onDeploy} disabled={busy === "deploy"}>
-                    Redeploy
-                  </button>
-                ) : null}
-              </div>
+      <section className="border border-zinc-800 bg-zinc-950/45 p-5">
+        <SectionHeader icon={PackageIcon} title="Latest Deployment" meta={latestStatus} />
+        {latestDeployment ? (
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <OverviewStat label="Status" value={latestStatus} meta={latestDeployment.trigger} />
+              <OverviewStat label="Commit" value={shortSha(latestDeployment.commitSha)} meta={latestDeployment.imageTag ?? "image pending"} />
+              <OverviewStat label="Duration" value={latestDuration ?? "Unknown"} meta={formatTime(latestDeployment.createdAt)} />
             </div>
-          ) : (
-            <div className="border border-dashed border-zinc-800 bg-zinc-950/50 p-6 text-sm text-zinc-500">No deployments yet. Deploy this service to populate the timeline.</div>
-          )}
-        </section>
-
-        <section className="border border-zinc-800 bg-zinc-950/45 p-5">
-          <SectionHeader icon={Globe02Icon} title={isDatabase ? "Connection Surface" : "URLs and Domains"} />
-          <div className="space-y-3">
-            <DefinitionRow label="Primary URL" value={primaryUrl || "Not available"} />
-            <DefinitionRow label="Local URL" value={service.localUrl || "Not available"} />
-            {isDatabase ? (
-              <>
-                <DefinitionRow label="Internal host" value={service.slug} />
-                <DefinitionRow label="Public access" value={service.databasePublicEnabled ? service.databasePublicHostname ?? "Enabled" : "Disabled"} />
-              </>
-            ) : (
-              <>
-                <DefinitionRow label="Custom domains" value={`${domains.length} total, ${activeDomains} active${pendingDomains > 0 ? `, ${pendingDomains} pending` : ""}`} />
-                <DefinitionRow label="Public IP" value={publicIp ?? "Unknown"} />
-              </>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={shellButton("secondary")} onClick={() => onTabChange("deployments")}>
+                View deploy output
+              </button>
+              {latestDeployment.status === "failed" ? (
+                <button type="button" className={shellButton("primary")} onClick={onDeploy} disabled={busy === "deploy"}>
+                  Redeploy
+                </button>
+              ) : null}
+            </div>
           </div>
-        </section>
-      </div>
+        ) : (
+          <div className="border border-dashed border-zinc-800 bg-zinc-950/50 p-6 text-sm text-zinc-500">No deployments yet. Deploy this service to populate the timeline.</div>
+        )}
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-3">
         <section className="border border-zinc-800 bg-zinc-950/45 p-5">
