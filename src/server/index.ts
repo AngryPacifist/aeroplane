@@ -19,6 +19,7 @@ import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
+import { envExampleVariableSuggestions } from "./env-example-suggestions.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
 import { getRailwayProjects, getRailwayProjectDetails, importRailwayProject } from "./railway-importer.js";
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
@@ -46,7 +47,7 @@ import {
 import { getSystemChecks } from "./system.js";
 import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenanceCleanup } from "./system-maintenance.js";
 import { writeAndReloadCaddy } from "./caddy.js";
-import { databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
+import { databaseConnectionEnvSuggestionsForProject, databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
@@ -133,6 +134,7 @@ const repoFullNameSchema = z.string().trim().refine((value) => {
 }, {
   message: "Choose a GitHub repository or database engine"
 });
+const githubRepoFullNameSchema = z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "Choose a GitHub repository");
 const hostnameRegex = /^[a-z0-9.-]+\.[a-z]{2,}$|^[a-z0-9-]+\.localhost$/;
 const publicHostnameSchema = z.preprocess((value) => {
   if (typeof value !== "string") return undefined;
@@ -287,6 +289,11 @@ const createServiceSchema = serviceSettingsSchema.extend({
     path: ["repoUrl"],
     message: "Choose a GitHub repository, Git URL, or database"
   });
+});
+const envExampleSuggestionsQuerySchema = z.object({
+  repo: githubRepoFullNameSchema,
+  branch: z.string().trim().min(1).default("main"),
+  rootDir: optionalRootDir
 });
 
 const updateServiceSchema = z.object({
@@ -1315,6 +1322,41 @@ app.patch("/api/projects/:projectId", async (c) => {
   return c.json({ project: await summarizeProject(updated, getServicesForProject(project.id)) });
 });
 
+app.get("/api/projects/:projectId/database-variable-suggestions", async (c) => {
+  const project = getProjectById(c.req.param("projectId"));
+  if (!project) {
+    return jsonError("Project not found", 404);
+  }
+
+  return c.json({ suggestions: databaseConnectionEnvSuggestionsForProject(project.id) });
+});
+
+app.get("/api/projects/:projectId/env-example-variable-suggestions", async (c) => {
+  const project = getProjectById(c.req.param("projectId"));
+  if (!project) {
+    return jsonError("Project not found", 404);
+  }
+
+  const query = envExampleSuggestionsQuerySchema.safeParse({
+    repo: c.req.query("repo"),
+    branch: c.req.query("branch") ?? undefined,
+    rootDir: c.req.query("rootDir") ?? undefined
+  });
+  if (!query.success) {
+    return jsonError(query.error.issues[0]?.message ?? "Invalid repository");
+  }
+
+  const databaseSuggestions = databaseConnectionEnvSuggestionsForProject(project.id);
+  const suggestions = await envExampleVariableSuggestions({
+    repoFullName: query.data.repo,
+    branch: query.data.branch,
+    rootDir: query.data.rootDir ?? null,
+    excludedKeys: databaseSuggestions.map((suggestion) => suggestion.key)
+  });
+
+  return c.json({ suggestions });
+});
+
 app.post("/api/projects/:projectId/services", async (c) => {
   const project = getProjectById(c.req.param("projectId"));
   if (!project) {
@@ -1493,7 +1535,7 @@ app.get("/api/services/:serviceId/suggestion-keys", async (c) => {
 
   for (const s of groupServices) {
     if (s.id === service.id) continue;
-    
+
     for (const prop of properties) {
       suggestions.push({
         key: `${s.slug}.${prop}`,
