@@ -125,10 +125,7 @@ export function AutocompleteInput({
   }
 
   return (
-    <div
-      className="relative w-full transition-[margin-bottom] duration-200 ease-in-out"
-      style={{ marginBottom: isOpen && filtered.length > 0 ? "250px" : "0px" }}
-    >
+    <div className="relative w-full min-w-0">
       <FormInput
         {...props}
         ref={inputRef}
@@ -140,7 +137,7 @@ export function AutocompleteInput({
       {isOpen && filtered.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 left-0 top-[calc(100%+0.25rem)] w-full max-h-60 overflow-y-auto border border-zinc-700 bg-zinc-950/98 shadow-2xl rounded backdrop-blur-md"
+          className="absolute left-0 top-[calc(100%+0.25rem)] z-[70] max-h-56 w-full overflow-y-auto border border-zinc-700 bg-zinc-950/98 shadow-2xl backdrop-blur-md"
         >
           <div className="flex flex-col">
             {filtered.map((item, index) => (
