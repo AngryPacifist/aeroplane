@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
-import { config } from "./config.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import {
   databaseDataVolumeArg,
@@ -19,6 +18,7 @@ import {
   postgresTlsVolumePrepareDockerPlan,
   postgresTlsVolumeArg
 } from "./postgres-tls.js";
+import { ensureProjectRuntimeNetwork, runtimeNetworkArgs } from "./runtime-network.js";
 
 export type MigrationDatabaseDump = {
   serviceId: string;
@@ -102,12 +102,6 @@ function envMapForService(serviceId: string) {
   return new Map(rows.map((row) => [row.key, row.value]));
 }
 
-async function ensureRuntimeNetwork() {
-  await runDocker(["network", "inspect", config.runtimeNetworkName]).catch(async () => {
-    await runDocker(["network", "create", config.runtimeNetworkName]);
-  });
-}
-
 async function startDatabaseContainer(service: Service, envMap: Map<string, string>) {
   const dbType = databaseTypeForService(service);
   const containerName = containerNameForService(service.id);
@@ -121,10 +115,7 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
     "unless-stopped",
     "--name",
     containerName,
-    "--network",
-    config.runtimeNetworkName,
-    "--network-alias",
-    service.slug,
+    ...runtimeNetworkArgs(service),
     "-p",
     `${bindHost}:${service.hostPort}:${service.internalPort}`
   ];
@@ -156,7 +147,12 @@ async function startDatabaseContainer(service: Service, envMap: Map<string, stri
       await runDocker(prep.cleanupCommand).catch(() => undefined);
     }
   }
-  await ensureRuntimeNetwork();
+  await ensureProjectRuntimeNetwork({
+    service,
+    containerNameForService,
+    runDocker,
+    runBufferedDocker
+  });
   await ensureStableDatabaseDataVolume({
     service,
     dbType,
