@@ -46,7 +46,7 @@ import {
 import { getSystemChecks } from "./system.js";
 import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenanceCleanup } from "./system-maintenance.js";
 import { writeAndReloadCaddy } from "./caddy.js";
-import { syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
+import { databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
 import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
@@ -1510,7 +1510,10 @@ app.get("/api/services/:serviceId/suggestion-keys", async (c) => {
     }
   }
 
-  return c.json({ suggestions });
+  return c.json({
+    suggestions,
+    databaseVariables: databaseConnectionEnvSuggestionsForService(service.id)
+  });
 });
 
 app.get("/api/services/:serviceId/database/tables", async (c) => {
