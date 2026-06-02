@@ -349,7 +349,7 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
           )}
         </div>
       </main>
-      <CreateServiceModal open={createServiceOpen} onClose={() => setCreateServiceOpen(false)} onCreate={createService} />
+      <CreateServiceModal projectId={project?.id ?? ""} open={createServiceOpen} onClose={() => setCreateServiceOpen(false)} onCreate={createService} />
       <DeleteProjectModal
         open={deleteProjectOpen}
         projectName={project?.name ?? projectSlug}
