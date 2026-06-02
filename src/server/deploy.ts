@@ -29,6 +29,7 @@ import {
 } from "./postgres-tls.js";
 import { ensureProjectRuntimeNetwork, runtimeNetworkArgs } from "./runtime-network.js";
 import { railpackBuildEnv, railpackBuildEnvArgs } from "./railpack-build-env.js";
+import { saveRedisDatasetIfRunning, stopRedisContainerForReplacement } from "./redis-persistence.js";
 
 type RunOptions = {
   cwd?: string;
@@ -637,6 +638,16 @@ async function runDeployment(deployment: Deployment, service: Service) {
     appendDeploymentLog(deployment.id, `Provisioning database service ${service.name} (${dbType})...`);
 
     try {
+      const redisPersistence = {
+        containerName,
+        password: env.REDIS_PASSWORD,
+        getContainerState,
+        runDocker: (args: string[]) => runCommand("docker", args, deployment.id, { redact: secrets }),
+        runBufferedDocker: (args: string[]) => runBufferedCommand("docker", args),
+        log: (line: string) => appendDeploymentLog(deployment.id, line, "system", secrets),
+        warn: (line: string) => appendDeploymentLog(deployment.id, line, "stderr", secrets)
+      };
+
       appendDeploymentLog(deployment.id, `Pulling official image: ${officialImage}`);
       await runCommand("docker", ["pull", officialImage], deployment.id);
       await ensureProjectRuntimeNetwork({
@@ -646,6 +657,9 @@ async function runDeployment(deployment: Deployment, service: Service) {
         runBufferedDocker: (args) => runBufferedCommand("docker", args),
         log: (line) => appendDeploymentLog(deployment.id, line)
       });
+      if (dbType === "redis") {
+        await saveRedisDatasetIfRunning(redisPersistence);
+      }
       await ensureStableDatabaseDataVolume({
         service,
         dbType,
@@ -655,9 +669,18 @@ async function runDeployment(deployment: Deployment, service: Service) {
         log: (line) => appendDeploymentLog(deployment.id, line)
       });
 
-      await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
-        appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
-      });
+      if (dbType === "redis") {
+        const hadRedisContainer = await stopRedisContainerForReplacement(redisPersistence);
+        if (hadRedisContainer) {
+          await runCommand("docker", ["rm", containerName], deployment.id, { redact: secrets });
+        } else {
+          appendDeploymentLog(deployment.id, `No previous Redis container named ${containerName} was present.`);
+        }
+      } else {
+        await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {
+          appendDeploymentLog(deployment.id, `No previous container named ${containerName} was running.`);
+        });
+      }
 
       const bindHost = "0.0.0.0";
       const postgresTlsAssets = dbType === "postgres" ? await ensurePostgresTlsAssets(service) : null;
