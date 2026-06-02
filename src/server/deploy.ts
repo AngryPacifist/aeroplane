@@ -27,6 +27,8 @@ import {
   postgresTlsVolumePrepareDockerPlan,
   postgresTlsVolumeArg
 } from "./postgres-tls.js";
+import { ensureProjectRuntimeNetwork, runtimeNetworkArgs } from "./runtime-network.js";
+import { railpackBuildEnv, railpackBuildEnvArgs } from "./railpack-build-env.js";
 
 type RunOptions = {
   cwd?: string;
@@ -228,18 +230,6 @@ async function ensureBuildkitAvailable(deploymentId: string) {
   appendDeploymentLog(deploymentId, `BuildKit is unavailable at ${config.buildkitHost}.`, "stderr");
   appendDeploymentLog(deploymentId, `Start it with: ${buildkitStartHint()}`, "stderr");
   throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
-}
-
-async function ensureRuntimeNetworkAvailable(deploymentId: string) {
-  const existing = await runBufferedCommand("docker", ["network", "inspect", config.runtimeNetworkName]);
-  if (existing.code === 0) return;
-
-  appendDeploymentLog(deploymentId, `Creating Docker runtime network ${config.runtimeNetworkName}.`);
-  await runCommand("docker", ["network", "create", config.runtimeNetworkName], deploymentId);
-}
-
-function runtimeNetworkArgs(service: Service) {
-  return ["--network", config.runtimeNetworkName, "--network-alias", service.slug];
 }
 
 function getEphemeralFreePort(): Promise<number> {
@@ -649,7 +639,13 @@ async function runDeployment(deployment: Deployment, service: Service) {
     try {
       appendDeploymentLog(deployment.id, `Pulling official image: ${officialImage}`);
       await runCommand("docker", ["pull", officialImage], deployment.id);
-      await ensureRuntimeNetworkAvailable(deployment.id);
+      await ensureProjectRuntimeNetwork({
+        service,
+        containerNameForService,
+        runDocker: (args) => runCommand("docker", args, deployment.id),
+        runBufferedDocker: (args) => runBufferedCommand("docker", args),
+        log: (line) => appendDeploymentLog(deployment.id, line)
+      });
       await ensureStableDatabaseDataVolume({
         service,
         dbType,
@@ -789,6 +785,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
     const hasCommandOverrides = Boolean(installCommand || buildCommand || startCommand);
     const looksLikeBunProject = packageManager === "bun";
     const isStaticService = Boolean(service.staticOutput?.trim());
+    const buildEnv = railpackBuildEnv(env, runtimePort);
 
     const railpackEnv: Record<string, string> = {
       ...env,
@@ -827,6 +824,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
     }
     await ensureBuildkitAvailable(deployment.id);
     const railpackArgs = ["build", "--name", imageTag, "--progress", "plain", "--cache-key", service.id];
+    railpackArgs.push(...railpackBuildEnvArgs(buildEnv));
     const railpackConfigFile = railpackEnv.RAILPACK_CONFIG_FILE;
     if (railpackConfigFile) {
       appendDeploymentLog(deployment.id, `Using Railpack config file: ${railpackConfigFile}`, "system", secrets);
@@ -868,7 +866,13 @@ async function runDeployment(deployment: Deployment, service: Service) {
     }
 
     // Allocate temporary ephemeral port for zero-downtime hot-swap
-    await ensureRuntimeNetworkAvailable(deployment.id);
+    await ensureProjectRuntimeNetwork({
+      service,
+      containerNameForService,
+      runDocker: (args) => runCommand("docker", args, deployment.id),
+      runBufferedDocker: (args) => runBufferedCommand("docker", args),
+      log: (line) => appendDeploymentLog(deployment.id, line)
+    });
     const tempPort = await getEphemeralFreePort();
     const tempContainerName = `${containerName}-${deployment.id}`;
     appendDeploymentLog(deployment.id, `Allocated ephemeral port ${tempPort} for zero-downtime container rollout.`);
