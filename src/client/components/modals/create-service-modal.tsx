@@ -9,7 +9,6 @@ import {
   GitBranchIcon,
   GithubIcon,
   Globe02Icon,
-  MoreVerticalIcon,
   PackageIcon,
   PencilEdit02Icon,
   Search01Icon,
@@ -20,6 +19,8 @@ import {
 import { FormEvent, ReactNode, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
+  type DatabaseVariableSuggestion,
+  type EnvExampleVariableSuggestion,
   type GitHubDirectory,
   type GitHubRepo,
   type GitHubStatus,
@@ -48,6 +49,10 @@ import { ImportTypeStep } from "./import-type-step";
 import { DatabaseSelectStep } from "./database-select-step";
 import { DatabaseConfigureStep } from "./database-configure-step";
 import type { DatabaseType } from "./database-service-options";
+import {
+  EnvironmentVariableSuggestions,
+  type EnvironmentVariableSuggestionGroup
+} from "../../features/services/environment-variable-suggestions";
 
 type ParsedEnvEntry = {
   key: string;
@@ -98,10 +103,12 @@ function parseEnvText(input: string): ParsedEnvEntry[] {
 }
 
 export function CreateServiceModal({
+  projectId,
   open,
   onClose,
   onCreate
 }: {
+  projectId: string;
   open: boolean;
   onClose: () => void;
   onCreate: (payload: ServiceFormPayload) => Promise<void>;
@@ -139,9 +146,12 @@ export function CreateServiceModal({
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [buildOpen, setBuildOpen] = useState(false);
   const [envOpen, setEnvOpen] = useState(false);
+  const [envSuggestionsOpen, setEnvSuggestionsOpen] = useState(false);
   const [newEnvOpen, setNewEnvOpen] = useState(false);
   const [envEntries, setEnvEntries] = useState<ParsedEnvEntry[]>([]);
   const [envForm, setEnvForm] = useState<ParsedEnvEntry>({ key: "", value: "" });
+  const [databaseVariableSuggestions, setDatabaseVariableSuggestions] = useState<DatabaseVariableSuggestion[]>([]);
+  const [envExampleVariableSuggestions, setEnvExampleVariableSuggestions] = useState<EnvExampleVariableSuggestion[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -195,13 +205,71 @@ export function CreateServiceModal({
       setExpandedDirectories(new Set());
       setBuildOpen(false);
       setEnvOpen(false);
+      setEnvSuggestionsOpen(false);
       setNewEnvOpen(false);
       setEnvEntries([]);
       setEnvForm({ key: "", value: "" });
+      setDatabaseVariableSuggestions([]);
+      setEnvExampleVariableSuggestions([]);
       setBusy(false);
       setError("");
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !projectId) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const result = await api.projectDatabaseVariableSuggestions(projectId);
+        if (!cancelled) setDatabaseVariableSuggestions(result.suggestions);
+      } catch {
+        if (!cancelled) setDatabaseVariableSuggestions([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectId]);
+
+  useEffect(() => {
+    const repoFullName = form.repoFullName;
+    const branch = form.branch;
+    const rootDir = form.rootDir;
+
+    if (
+      !open ||
+      !projectId ||
+      step !== "configure" ||
+      serviceType !== "git" ||
+      gitSourceMode !== "github" ||
+      !repoFullName ||
+      !branch
+    ) {
+      setEnvExampleVariableSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.projectEnvExampleVariableSuggestions(projectId, {
+          repoFullName,
+          branch,
+          rootDir
+        });
+        if (!cancelled) setEnvExampleVariableSuggestions(result.suggestions);
+      } catch {
+        if (!cancelled) setEnvExampleVariableSuggestions([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.branch, form.repoFullName, form.rootDir, gitSourceMode, open, projectId, serviceType, step]);
 
   useEffect(() => {
     if (!open) return;
@@ -488,6 +556,18 @@ export function CreateServiceModal({
     setNewEnvOpen(false);
   }
 
+  function addEnvironmentVariableSuggestions(entries: ParsedEnvEntry[]) {
+    setEnvEntries((current) => {
+      const next = new Map(current.map((entry) => [entry.key, entry.value]));
+      for (const entry of entries) {
+        if (!entry.key.trim()) continue;
+        next.set(entry.key.trim(), entry.value);
+      }
+      return Array.from(next.entries()).map(([key, value]) => ({ key, value }));
+    });
+    setEnvSuggestionsOpen(false);
+  }
+
   const modalIcon =
     step === "type"
       ? PackageIcon
@@ -530,6 +610,39 @@ export function CreateServiceModal({
       : step === "directory"
       ? "Step 2 of 3"
       : "Step 3 of 3";
+  const databaseSuggestionKeys = useMemo(() => {
+    return new Set(databaseVariableSuggestions.map((suggestion) => suggestion.key.toUpperCase()));
+  }, [databaseVariableSuggestions]);
+  const visibleEnvExampleVariableSuggestions = useMemo(() => {
+    return envExampleVariableSuggestions.filter((suggestion) => !databaseSuggestionKeys.has(suggestion.key.toUpperCase()));
+  }, [databaseSuggestionKeys, envExampleVariableSuggestions]);
+  const environmentVariableSuggestionGroups = useMemo<EnvironmentVariableSuggestionGroup[]>(() => {
+    return [
+      {
+        id: "database",
+        title: "Database variables",
+        suggestions: databaseVariableSuggestions.map((suggestion) => ({
+          id: `database:${suggestion.serviceId}:${suggestion.key}`,
+          key: suggestion.key,
+          value: `\${${suggestion.serviceSlug}.${suggestion.sourceKey}}`,
+          label: suggestion.label,
+          context: suggestion.serviceSlug
+        }))
+      },
+      {
+        id: "env-example",
+        title: ".env.example variables",
+        suggestions: visibleEnvExampleVariableSuggestions.map((suggestion) => ({
+          id: `env-example:${suggestion.sourcePath}:${suggestion.key}`,
+          key: suggestion.key,
+          value: "",
+          label: suggestion.label,
+          context: suggestion.sourcePath
+        }))
+      }
+    ];
+  }, [databaseVariableSuggestions, visibleEnvExampleVariableSuggestions]);
+  const environmentVariableSuggestionCount = environmentVariableSuggestionGroups.reduce((total, group) => total + group.suggestions.length, 0);
 
   return (
     <ModalShell
@@ -904,23 +1017,50 @@ export function CreateServiceModal({
           </div>
 
           <div className="space-y-3">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between border border-zinc-700 bg-zinc-900/90 px-4 py-4 text-left"
-              onClick={() => setEnvOpen((current) => !current)}
-            >
-              <span className="text-base font-medium text-zinc-100">Environment Variables</span>
-              <AppIcon icon={ArrowLeft01Icon} size={16} className={envOpen ? "rotate-90" : "-rotate-90"} />
-            </button>
+            <div className="flex w-full items-center border border-zinc-700 bg-zinc-900/90">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-3 px-4 py-4 text-left"
+                onClick={() => setEnvOpen((current) => !current)}
+              >
+                <span className="text-base font-medium text-zinc-100">Environment Variables</span>
+              </button>
+              {environmentVariableSuggestionCount > 0 ? (
+                <button
+                  type="button"
+                  className="mr-2 inline-flex shrink-0 items-center border border-[#4FB8B2]/35 bg-[#4FB8B2]/10 px-2.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#7fe3dd] transition hover:bg-[#4FB8B2]/16"
+                  onClick={() => {
+                    setEnvOpen(true);
+                    setEnvSuggestionsOpen((current) => !current);
+                  }}
+                >
+                  [{environmentVariableSuggestionCount} suggestion{environmentVariableSuggestionCount === 1 ? "" : "s"}]
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="px-4 py-4 text-zinc-300 transition hover:text-zinc-100"
+                onClick={() => setEnvOpen((current) => !current)}
+                aria-label={envOpen ? "Collapse environment variables" : "Expand environment variables"}
+              >
+                <AppIcon icon={ArrowLeft01Icon} size={16} className={envOpen ? "rotate-90" : "-rotate-90"} />
+              </button>
+            </div>
             {envOpen ? (
               <div className="space-y-4 border border-zinc-700 bg-zinc-900 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm text-zinc-300">These variables will be saved with the service and used on deploy.</div>
+                <div className="flex items-center justify-end gap-3">
                   <button type="button" className={shellButton("secondary")} onClick={() => setNewEnvOpen((current) => !current)}>
                     <AppIcon icon={AddSquareIcon} size={16} />
                     New variable
                   </button>
                 </div>
+
+                {envSuggestionsOpen ? (
+                  <EnvironmentVariableSuggestions
+                    groups={environmentVariableSuggestionGroups}
+                    onAdd={addEnvironmentVariableSuggestions}
+                  />
+                ) : null}
 
                 {newEnvOpen ? (
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)_auto]">
@@ -982,9 +1122,10 @@ export function CreateServiceModal({
                         <button
                           type="button"
                           className="ml-auto inline-flex h-9 w-9 items-center justify-center text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+                          aria-label={`Delete ${item.key}`}
                           onClick={() => setEnvEntries((current) => current.filter((entry) => entry.key !== item.key))}
                         >
-                          <AppIcon icon={MoreVerticalIcon} size={18} />
+                          <AppIcon icon={Delete02Icon} size={16} />
                         </button>
                       </div>
                     ))
