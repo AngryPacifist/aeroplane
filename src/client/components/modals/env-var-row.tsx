@@ -105,7 +105,7 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
       <div className="border-b border-zinc-800 bg-zinc-900/40 px-5 py-3 transition-colors duration-200 flex flex-col gap-2 w-full">
         <form
           onSubmit={handleSave}
-          className="grid grid-cols-[1fr_1fr_auto] items-center gap-3 w-full"
+          className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3"
         >
           <div>
             <FormInput
@@ -118,7 +118,7 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
               className="font-mono uppercase tracking-[0.06em] h-9 text-xs focus:border-[#4FB8B2]"
             />
           </div>
-          <div className="relative flex items-center">
+          <div className="relative flex min-w-0 items-center">
             <AutocompleteInput
               type={hidden ? "password" : "text"}
               value={editValue}
@@ -182,7 +182,7 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
 
   return (
     <div className="border-b border-zinc-800 last:border-b-0 px-5 py-4 bg-zinc-900/10 hover:bg-zinc-900/30 transition-colors duration-200 flex flex-col gap-2 w-full">
-      <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-4 w-full">
+      <div className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-4">
         <div className="flex min-w-0 items-center gap-4">
           <span className="font-mono text-lg text-zinc-500">{`{ }`}</span>
           <span className="truncate font-mono text-[15px] uppercase tracking-[0.06em] text-zinc-100 font-medium">
@@ -191,7 +191,7 @@ export function EnvVarRow({ item, onSave, onDelete, busy, suggestions }: EnvVarR
           <PublicDatabaseUrlHint />
         </div>
 
-        <div className="relative flex items-center">
+        <div className="relative flex min-w-0 items-center">
           <FormInput
             type={hidden ? "password" : "text"}
             value={item.value ?? ""}
