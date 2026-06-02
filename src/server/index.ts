@@ -49,7 +49,7 @@ import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenan
 import { writeAndReloadCaddy } from "./caddy.js";
 import { databaseConnectionEnvSuggestionsForProject, databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
-import { configuredControlPlaneHostname, getSystemSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
+import { configuredControlPlaneHostname, getSystemSettings, normalizeDeploymentConcurrency, publicR2Settings, saveSystemSettings } from "./system-settings.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
 import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices, isGeneratedServiceHostname } from "./service-domains.js";
 import { normalizeRootDomain } from "./root-domain.js";
@@ -1065,7 +1065,16 @@ app.get("/api/system/settings", async (c) => {
   if (controlPlaneHostname) {
     controlPlaneDnsStatus = await checkDomainDns(controlPlaneHostname, cachedPublicIp);
   }
-  return c.json({ settings: { rootDomain, controlPlaneHostname }, publicIp: cachedPublicIp, dnsStatus, controlPlaneDnsStatus });
+  return c.json({
+    settings: {
+      rootDomain,
+      controlPlaneHostname,
+      deploymentConcurrency: settings.deploymentConcurrency
+    },
+    publicIp: cachedPublicIp,
+    dnsStatus,
+    controlPlaneDnsStatus
+  });
 });
 
 app.post("/api/system/settings", async (c) => {
@@ -1073,7 +1082,9 @@ app.post("/api/system/settings", async (c) => {
   const settings = getSystemSettings();
   const hasRootDomain = Object.prototype.hasOwnProperty.call(body, "rootDomain");
   const hasControlPlaneHostname = Object.prototype.hasOwnProperty.call(body, "controlPlaneHostname");
+  const hasDeploymentConcurrency = Object.prototype.hasOwnProperty.call(body, "deploymentConcurrency");
   const rootDomain = hasRootDomain ? normalizeRootDomain(String(body.rootDomain ?? "")) : normalizeRootDomain(settings.rootDomain);
+  let deploymentConcurrency = settings.deploymentConcurrency;
 
   let controlPlaneHostname = configuredControlPlaneHostname(settings);
   if (hasControlPlaneHostname) {
@@ -1086,13 +1097,24 @@ app.post("/api/system/settings", async (c) => {
     config.controlPlaneHostname = controlPlaneHostname;
   }
 
-  saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname });
-  if (rootDomain) {
+  if (hasDeploymentConcurrency) {
+    const rawConcurrency = Number(body.deploymentConcurrency);
+    if (!Number.isInteger(rawConcurrency) || rawConcurrency < 1 || rawConcurrency > 10) {
+      return jsonError("Deployment concurrency must be a whole number between 1 and 10.");
+    }
+    deploymentConcurrency = normalizeDeploymentConcurrency(rawConcurrency);
+  }
+
+  saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname, deploymentConcurrency });
+  const routingChanged = hasRootDomain || hasControlPlaneHostname;
+  if (hasRootDomain && rootDomain) {
     ensureDefaultDomainsForExistingServices(rootDomain);
   }
-  syncAllExistingDatabaseUrls();
-  const caddy = await writeAndReloadCaddy();
-  return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname }, caddy });
+  if (routingChanged) {
+    syncAllExistingDatabaseUrls();
+  }
+  const caddy = routingChanged ? await writeAndReloadCaddy() : undefined;
+  return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname, deploymentConcurrency }, caddy });
 });
 
 app.get("/api/system/r2", (c) => c.json({ r2: publicR2Settings() }));
