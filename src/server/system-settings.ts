@@ -6,6 +6,7 @@ import { decryptSecret, encryptSecret } from "./secret-crypto.js";
 export interface SystemSettings {
   rootDomain: string;
   controlPlaneHostname: string;
+  deploymentConcurrency: number;
   r2?: R2Settings | null;
 }
 
@@ -30,6 +31,14 @@ export type PublicR2Settings = {
 };
 
 const settingsPath = resolve(config.dataDir, "system-settings.json");
+export const defaultDeploymentConcurrency = 3;
+export const maxDeploymentConcurrency = 10;
+
+export function normalizeDeploymentConcurrency(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return defaultDeploymentConcurrency;
+  return Math.min(maxDeploymentConcurrency, Math.max(1, parsed));
+}
 
 function decryptR2Settings(r2: SystemSettings["r2"]): SystemSettings["r2"] {
   if (!r2) return null;
@@ -48,9 +57,11 @@ function decryptR2Settings(r2: SystemSettings["r2"]): SystemSettings["r2"] {
 }
 
 function serializeSystemSettings(settings: SystemSettings): SystemSettings {
-  if (!settings.r2) return { ...settings, r2: null };
+  const deploymentConcurrency = normalizeDeploymentConcurrency(settings.deploymentConcurrency);
+  if (!settings.r2) return { ...settings, deploymentConcurrency, r2: null };
   return {
     ...settings,
+    deploymentConcurrency,
     r2: {
       ...settings.r2,
       secretAccessKey: encryptSecret(settings.r2.secretAccessKey)
@@ -66,6 +77,7 @@ export function getSystemSettings(): SystemSettings {
       return {
         rootDomain: parsed.rootDomain ?? "",
         controlPlaneHostname: parsed.controlPlaneHostname ?? "",
+        deploymentConcurrency: normalizeDeploymentConcurrency(parsed.deploymentConcurrency),
         r2: decryptR2Settings(parsed.r2 ?? null)
       };
     }
@@ -75,8 +87,13 @@ export function getSystemSettings(): SystemSettings {
   return {
     rootDomain: "",
     controlPlaneHostname: "",
+    deploymentConcurrency: defaultDeploymentConcurrency,
     r2: null
   };
+}
+
+export function deploymentConcurrency(settings = getSystemSettings()) {
+  return normalizeDeploymentConcurrency(settings.deploymentConcurrency);
 }
 
 export function saveSystemSettings(settings: SystemSettings): void {
