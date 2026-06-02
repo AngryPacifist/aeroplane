@@ -30,6 +30,7 @@ import {
 import { ensureProjectRuntimeNetwork, runtimeNetworkArgs } from "./runtime-network.js";
 import { railpackBuildEnv, railpackBuildEnvArgs } from "./railpack-build-env.js";
 import { saveRedisDatasetIfRunning, stopRedisContainerForReplacement } from "./redis-persistence.js";
+import { deploymentConcurrency } from "./system-settings.js";
 
 type RunOptions = {
   cwd?: string;
@@ -48,8 +49,9 @@ type EnqueueOptions = {
   trigger: "manual" | "github";
 };
 
-let workerActive = false;
 let workerStarted = false;
+const activeDeployments = new Set<string>();
+const activeDeploymentServices = new Set<string>();
 const activeCommands = new Map<string, ChildProcess>();
 const abortRequests = new Set<string>();
 
@@ -980,35 +982,51 @@ async function runDeployment(deployment: Deployment, service: Service) {
   }
 }
 
+function startDeploymentJob(deployment: Deployment, service: Service) {
+  activeDeployments.add(deployment.id);
+  activeDeploymentServices.add(service.id);
+
+  void runDeployment(deployment, service).finally(() => {
+    activeDeployments.delete(deployment.id);
+    activeDeploymentServices.delete(service.id);
+    void tickWorker();
+  });
+}
+
 async function tickWorker() {
-  if (workerActive) {
+  const availableSlots = deploymentConcurrency() - activeDeployments.size;
+  if (availableSlots <= 0) {
     return;
   }
 
-  const queued = db
+  const queuedDeployments = db
     .select()
     .from(deployments)
     .where(inArray(deployments.status, ["queued"]))
     .orderBy(desc(deployments.createdAt))
-    .limit(1)
-    .get();
+    .all();
 
-  if (!queued) {
+  if (queuedDeployments.length === 0) {
     return;
   }
 
-  const service = getServiceById(queued.serviceId);
-  if (!service) {
-    db.update(deployments).set({ status: "failed", finishedAt: now() }).where(eq(deployments.id, queued.id)).run();
-    appendDeploymentLog(queued.id, "Deployment failed: service no longer exists.", "stderr");
-    return;
-  }
+  let started = 0;
+  const selectedServices = new Set<string>();
+  for (const queued of queuedDeployments) {
+    if (started >= availableSlots) break;
+    if (activeDeployments.has(queued.id)) continue;
+    if (activeDeploymentServices.has(queued.serviceId) || selectedServices.has(queued.serviceId)) continue;
 
-  workerActive = true;
-  try {
-    await runDeployment(queued, service);
-  } finally {
-    workerActive = false;
+    const service = getServiceById(queued.serviceId);
+    if (!service) {
+      db.update(deployments).set({ status: "failed", finishedAt: now() }).where(eq(deployments.id, queued.id)).run();
+      appendDeploymentLog(queued.id, "Deployment failed: service no longer exists.", "stderr");
+      continue;
+    }
+
+    selectedServices.add(service.id);
+    started += 1;
+    startDeploymentJob(queued, service);
   }
 }
 
