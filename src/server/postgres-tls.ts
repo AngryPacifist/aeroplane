@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { findCaddyCertificateForHost, waitForCaddyCertificateForHost } from "./caddy-certificates.js";
 import { config } from "./config.js";
 import { runDockerExec } from "./database-viewer-shared.js";
 import type { Service } from "./schema.js";
@@ -21,6 +22,7 @@ export type PostgresTlsAssets = {
   caCertPath: string;
   serverCertPath: string;
   serverKeyPath: string;
+  certificateSource: "aeroplane-ca" | "public-ca";
 };
 
 export type PostgresTlsInfo = {
@@ -36,6 +38,7 @@ export type PostgresTlsInfo = {
   caDownloadUrl: string;
   caFingerprint: string | null;
   certificateHosts: string[];
+  certificateSource: "aeroplane-ca" | "public-ca";
   wranglerCommand: string | null;
 };
 
@@ -83,7 +86,7 @@ function tlsVolumeName(serviceId: string) {
   return `aeroplane-postgres-tls-${hash}`;
 }
 
-function assetPaths(serviceId: string): PostgresTlsAssets & {
+function assetPaths(serviceId: string): Omit<PostgresTlsAssets, "certificateSource"> & {
   caKeyPath: string;
   serverCsrPath: string;
   serverConfigPath: string;
@@ -135,6 +138,18 @@ function opensslConfigForHosts(hosts: string[]) {
 function caFingerprint(caCertPath: string) {
   if (!existsSync(caCertPath)) return null;
   return createHash("sha256").update(readFileSync(caCertPath)).digest("hex");
+}
+
+function fileFingerprint(filePath: string) {
+  if (!existsSync(filePath)) return null;
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function certificateSource(service: Service, serverCertPath: string): PostgresTlsAssets["certificateSource"] {
+  if (!service.databasePublicHostname) return "aeroplane-ca";
+  const caddyCertificate = findCaddyCertificateForHost(service.databasePublicHostname);
+  if (!caddyCertificate) return "aeroplane-ca";
+  return fileFingerprint(serverCertPath) === fileFingerprint(caddyCertificate.certPath) ? "public-ca" : "aeroplane-ca";
 }
 
 async function ensureCa(paths: ReturnType<typeof assetPaths>, service: Service) {
@@ -189,17 +204,38 @@ async function createServerCertificate(paths: ReturnType<typeof assetPaths>, ser
   chmodSync(paths.serverCertPath, 0o644);
 }
 
+async function usePublicCertificate(paths: ReturnType<typeof assetPaths>, service: Service) {
+  if (!service.databasePublicHostname) return false;
+  const certificate = await waitForCaddyCertificateForHost(service.databasePublicHostname);
+  if (!certificate) return false;
+
+  try {
+    await ensureCa(paths, service);
+    copyFileSync(certificate.certPath, paths.serverCertPath);
+    copyFileSync(certificate.keyPath, paths.serverKeyPath);
+    chmodSync(paths.serverCertPath, 0o644);
+    chmodSync(paths.serverKeyPath, 0o600);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensurePostgresTlsAssets(service: Service): Promise<PostgresTlsAssets> {
   const paths = assetPaths(service.id);
   mkdirSync(paths.hostDir, { recursive: true });
-  await ensureCa(paths, service);
-  await createServerCertificate(paths, service);
+  const publicCertificateReady = await usePublicCertificate(paths, service);
+  if (!publicCertificateReady) {
+    await ensureCa(paths, service);
+    await createServerCertificate(paths, service);
+  }
   return {
     hostDir: paths.hostDir,
     volumeName: paths.volumeName,
     caCertPath: paths.caCertPath,
     serverCertPath: paths.serverCertPath,
-    serverKeyPath: paths.serverKeyPath
+    serverKeyPath: paths.serverKeyPath,
+    certificateSource: publicCertificateReady ? "public-ca" : "aeroplane-ca"
   };
 }
 
@@ -330,6 +366,7 @@ export function getPostgresTlsInfo(service: Service, envMap: EnvMap, active: boo
     caDownloadUrl: `/api/services/${service.id}/database/tls/ca`,
     caFingerprint: caFingerprint(paths.caCertPath),
     certificateHosts: postgresTlsCertificateHosts(service),
+    certificateSource: certificateSource(service, paths.serverCertPath),
     wranglerCommand: wranglerCommand(service, connectionString)
   };
 }
