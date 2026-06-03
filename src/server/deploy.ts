@@ -121,9 +121,17 @@ function runCommand(command: string, args: string[], deploymentId: string, optio
       stdio: ["ignore", "pipe", "pipe"]
     });
     activeCommands.set(deploymentId, child);
+    let stdout = "";
+    let stderr = "";
 
     const handleChunk = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
-      const lines = chunk.toString().split(/\r?\n/);
+      const text = chunk.toString();
+      if (stream === "stdout") {
+        stdout += text;
+      } else {
+        stderr += text;
+      }
+      const lines = text.split(/\r?\n/);
       for (const line of lines) {
         if (line.trim().length > 0) {
           appendDeploymentLog(deploymentId, line, stream, redactions);
@@ -150,7 +158,7 @@ function runCommand(command: string, args: string[], deploymentId: string, optio
       if (code === 0) {
         resolvePromise();
       } else {
-        reject(new Error(`${command} exited with ${code}`));
+        reject(new Error(redactLine((stderr || stdout || `${command} exited with ${code}`).trim(), redactions)));
       }
     });
   });
