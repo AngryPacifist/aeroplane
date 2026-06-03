@@ -2,7 +2,7 @@ import { ArrowLeft01Icon, AddSquareIcon, Settings01Icon } from "@hugeicons/core-
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../../api";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
-import { getDatabaseOption, type DatabaseType, type EnvEntry } from "./database-service-options";
+import { getDatabaseOption, isPostgresFamilyDatabase, type DatabaseType, type EnvEntry } from "./database-service-options";
 import { generateDatabaseHostname } from "./database-hostname";
 
 interface DatabaseConfigureStepProps {
@@ -46,10 +46,13 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
     const password = generateRandomPassword();
     const list: EnvEntry[] = [];
 
-    if (dbType === "postgres") {
+    if (isPostgresFamilyDatabase(dbType)) {
       list.push({ key: "POSTGRES_DB", value: "aeroplane" });
       list.push({ key: "POSTGRES_USER", value: "postgres" });
       list.push({ key: "POSTGRES_PASSWORD", value: password });
+      if (dbType === "timescale") {
+        list.push({ key: "TIMESCALEDB_TELEMETRY", value: "off" });
+      }
     } else if (dbType === "mysql") {
       const userPassword = generateRandomPassword();
       list.push({ key: "MYSQL_DATABASE", value: "aeroplane" });
@@ -156,7 +159,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
             <div>
               <FieldLabel>Public URL variable</FieldLabel>
               <div className="flex h-11 min-w-0 items-center border border-zinc-800 bg-zinc-950 px-3 font-mono text-xs text-zinc-100">
-                <span className="truncate">{dbType === "postgres" ? "POSTGRES_PUBLIC_URL" : `${dbType.toUpperCase()}_PUBLIC_URL`}</span>
+                <span className="truncate">{isPostgresFamilyDatabase(dbType) ? "POSTGRES_PUBLIC_URL" : `${dbType.toUpperCase()}_PUBLIC_URL`}</span>
               </div>
             </div>
           </div>
