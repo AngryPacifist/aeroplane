@@ -211,6 +211,22 @@ export type PostgresDataImportResult = {
   importedAt: string;
 };
 
+export type DatabaseDataImport = {
+  id: string;
+  serviceId: string;
+  engine: string;
+  source: string;
+  sourceLabel: string;
+  sourceVariableKey: null | string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  dumpSizeBytes: null | number;
+  checksum: null | string;
+  error: null | string;
+  createdAt: string;
+  startedAt: null | string;
+  finishedAt: null | string;
+};
+
 export type AuthUser = {
   id: string;
   name: string;
@@ -630,7 +646,13 @@ export const api = {
       body: JSON.stringify({ apiToken, projectId })
     }),
   railwayImport: (apiToken: string, projectId: string, config?: unknown) =>
-    request<{ ok: boolean; projectSlug: string }>("/api/integrations/railway/import", {
+    request<{
+      ok: boolean;
+      projectSlug: string;
+      importedCustomDomainCount?: number;
+      linkedDatabaseVariables?: number;
+      syncedDatabaseVariables?: number;
+    }>("/api/integrations/railway/import", {
       method: "POST",
       body: JSON.stringify({ apiToken, projectId, config })
     }),
@@ -740,6 +762,8 @@ export const api = {
     `/api/services/${serviceId}/database/backups/${backupId}/download`,
   serviceImportSources: (serviceId: string) =>
     request<{ sources: ServiceImportSource[] }>(`/api/services/${serviceId}/import-sources`),
+  databaseDataImports: (serviceId: string) =>
+    request<{ imports: DatabaseDataImport[] }>(`/api/services/${serviceId}/database/imports`),
   importPostgresDataFromUrl: (serviceId: string, sourceUrl: string) =>
     request<{ result: PostgresDataImportResult }>(`/api/services/${serviceId}/database/import/postgres-url`, {
       method: "POST",
