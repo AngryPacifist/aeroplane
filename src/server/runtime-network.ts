@@ -61,6 +61,11 @@ function parseContainerInspect(stdout: string): ContainerInspect | null {
   }
 }
 
+function isDockerAlreadyExistsError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already exists/i.test(message);
+}
+
 async function inspectContainer(containerName: string, runBufferedDocker: RunBufferedDocker) {
   const inspected = await runBufferedDocker(["inspect", containerName]);
   if (inspected.code !== 0) return null;
@@ -142,7 +147,14 @@ export async function ensureProjectRuntimeNetwork({
   const existing = await runBufferedDocker(["network", "inspect", networkName]);
   if (existing.code !== 0) {
     log?.(`Creating Docker project runtime network ${networkName}.`);
-    await runDocker(["network", "create", networkName]);
+    try {
+      await runDocker(["network", "create", networkName]);
+    } catch (error) {
+      if (!isDockerAlreadyExistsError(error)) {
+        throw error;
+      }
+      log?.(`Docker project runtime network ${networkName} already exists.`);
+    }
   }
 
   await connectProjectContainersToRuntimeNetwork({
