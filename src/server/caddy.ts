@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { config } from "./config.js";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { db } from "./db.js";
 import { domains, services } from "./schema.js";
 import { ensureDefaultDomainsForExistingServices } from "./service-domains.js";
@@ -37,6 +38,20 @@ function currentCaddyReloadCmd() {
   return process.env.CADDY_RELOAD_CMD ?? config.caddyReloadCmd;
 }
 
+function caddyReloadDetail(output: string, code: number | null) {
+  const trimmed = output.trim();
+  if (/localhost:2019\/load|dial tcp .*:2019: connect: connection refused/i.test(trimmed)) {
+    return "Caddy config was written, but Caddy's admin API is not reachable. Start Caddy or set CADDY_RELOAD_CMD to the reload command for your running Caddy instance.";
+  }
+
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (line && /^error:/i.test(line)) return line;
+  }
+  return lines[lines.length - 1] ?? `caddy reload exited with ${code}`;
+}
+
 function controlPlaneBlock() {
   const hostname = currentControlPlaneHostname();
   if (!hostname) return null;
@@ -64,11 +79,29 @@ export function renderCaddyfile() {
     .innerJoin(services, eq(services.id, domains.serviceId))
     .where(and(inArray(domains.status, ["active", "pending"]), routableService))
     .all();
+  const databaseMappings = db
+    .select({
+      hostname: services.databasePublicHostname,
+      hostPort: services.hostPort,
+      repoUrl: services.repoUrl,
+      repoFullName: services.repoFullName
+    })
+    .from(services)
+    .where(and(eq(services.databasePublicEnabled, true), isNotNull(services.databasePublicHostname)))
+    .all();
 
   const blocks: string[] = [];
+  const blockHostnames = new Set<string>();
+  function addHostnameBlock(hostname: string, block: string) {
+    if (blockHostnames.has(hostname)) return;
+    blockHostnames.add(hostname);
+    blocks.push(block);
+  }
+
   const controlPlane = controlPlaneBlock();
   if (controlPlane) {
-    blocks.push(controlPlane);
+    const hostname = currentControlPlaneHostname();
+    if (hostname) addHostnameBlock(hostname, controlPlane);
   }
   const controlPlaneHostname = currentControlPlaneHostname();
 
@@ -78,7 +111,7 @@ export function renderCaddyfile() {
     if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
 
     if (row.staticOutput) {
-      blocks.push(`${row.hostname} {
+      addHostnameBlock(row.hostname, `${row.hostname} {
 ${caddyTlsConfig(row.hostname)}  root * ${staticSiteDirForService(row.serviceId)}
   try_files {path} {path}/ /index.html
   file_server
@@ -87,9 +120,21 @@ ${caddyTlsConfig(row.hostname)}  root * ${staticSiteDirForService(row.serviceId)
     }
 
     const targetPort = row.activePort ?? row.hostPort;
-    blocks.push(`${row.hostname} {
+    addHostnameBlock(row.hostname, `${row.hostname} {
 ${caddyTlsConfig(row.hostname)}  encode zstd gzip
   reverse_proxy 127.0.0.1:${targetPort}
+}`);
+  }
+
+  for (const row of databaseMappings) {
+    if (!row.hostname) continue;
+    const isDatabase = row.repoUrl === "database" || (row.repoFullName?.startsWith("database:") ?? false);
+    const dbType = row.repoFullName?.split(":")[1] || "postgres";
+    if (!isDatabase || !isPostgresFamilyDatabase(dbType)) continue;
+    if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
+
+    addHostnameBlock(row.hostname, `${row.hostname} {
+${caddyTlsConfig(row.hostname)}  respond "Aeroplane ${dbType === "timescale" ? "TimescaleDB" : "Postgres"} is available on TCP ${row.hostPort}." 200
 }`);
   }
 
@@ -125,7 +170,7 @@ export async function writeAndReloadCaddy() {
     child.on("close", (code) => {
       resolve({
         ok: code === 0,
-        detail: output.trim() || `caddy reload exited with ${code}`
+        detail: caddyReloadDetail(output, code)
       });
     });
   });
