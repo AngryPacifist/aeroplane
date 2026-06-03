@@ -69,6 +69,27 @@ export function getRailwayImportSource(serviceId: string) {
     .get() ?? null;
 }
 
+export function mergeRailwayImportSourceMetadata(serviceId: string, metadata: Record<string, unknown>) {
+  const source = getRailwayImportSource(serviceId);
+  if (!source) return null;
+
+  const timestamp = nowIso();
+  const nextMetadata = {
+    ...(parseMetadata(source.metadata) ?? {}),
+    ...metadata
+  };
+
+  db.update(serviceImportSources)
+    .set({
+      metadata: JSON.stringify(nextMetadata),
+      updatedAt: timestamp
+    })
+    .where(eq(serviceImportSources.id, source.id))
+    .run();
+
+  return nextMetadata;
+}
+
 export function recordServiceImportSource(input: RecordServiceImportSourceInput) {
   const timestamp = nowIso();
   db.insert(serviceImportSources)
