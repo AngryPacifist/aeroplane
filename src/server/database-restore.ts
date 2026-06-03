@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import {
-  databaseDataVolumeArg,
-  databaseImage
-} from "./database-runtime.js";
+import { databaseDataVolumeArg } from "./database-runtime.js";
+import { databaseImageForService } from "./database-source-image.js";
 import { ensureStableDatabaseDataVolume, type BufferedDockerResult } from "./database-volume-adoption.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { db } from "./db.js";
@@ -105,9 +104,9 @@ function envMapForService(serviceId: string) {
 async function startDatabaseContainer(service: Service, envMap: Map<string, string>) {
   const dbType = databaseTypeForService(service);
   const containerName = containerNameForService(service.id);
-  const image = databaseImage(dbType);
+  const image = databaseImageForService(service, dbType);
   const bindHost = "0.0.0.0";
-  const postgresTlsAssets = dbType === "postgres" ? await ensurePostgresTlsAssets(service) : null;
+  const postgresTlsAssets = isPostgresFamilyDatabase(dbType) ? await ensurePostgresTlsAssets(service) : null;
   const dockerArgs = [
     "run",
     "-d",
@@ -171,7 +170,7 @@ async function copyDumpToContainer(containerName: string, localPath: string) {
 }
 
 async function waitForDatabase(service: Service, dbType: string, envMap: Map<string, string>, containerName: string) {
-  if (dbType === "postgres") {
+  if (isPostgresFamilyDatabase(dbType)) {
     const user = envMap.get("POSTGRES_USER") || "postgres";
     await retryReadiness("Postgres", () =>
       runDockerExec(containerName, ["pg_isready", "-h", "127.0.0.1", "-p", String(service.internalPort), "-U", user])
@@ -256,7 +255,7 @@ export async function restoreDatabaseDump(dump: MigrationDatabaseDump, localPath
   await startDatabaseContainer(service, envMap);
   await waitForDatabase(service, dbType, envMap, containerName);
 
-  if (dbType === "postgres") return restorePostgres(service, envMap, containerName, localPath);
+  if (isPostgresFamilyDatabase(dbType)) return restorePostgres(service, envMap, containerName, localPath);
   if (dbType === "mysql") return restoreMysql(service, envMap, containerName, localPath);
   if (dbType === "mongodb" || dbType === "mongo") return restoreMongo(service, envMap, containerName, localPath);
   if (dbType === "redis") return restoreRedis(service, containerName, localPath);
