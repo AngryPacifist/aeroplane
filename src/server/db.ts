@@ -118,6 +118,22 @@ CREATE TABLE IF NOT EXISTS database_backup_settings (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS database_data_imports (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  engine TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_label TEXT NOT NULL,
+  source_variable_key TEXT,
+  status TEXT NOT NULL,
+  dump_size_bytes INTEGER,
+  checksum TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS service_import_sources (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -201,6 +217,8 @@ CREATE INDEX IF NOT EXISTS idx_services_project_group ON projects(project_group_
 CREATE INDEX IF NOT EXISTS idx_services_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_database_backups_service_created ON database_backups(project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_database_backups_service_trigger_created ON database_backups(project_id, trigger, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_database_data_imports_service_created ON database_data_imports(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_database_data_imports_service_status ON database_data_imports(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_service_import_sources_service ON service_import_sources(project_id);
 CREATE INDEX IF NOT EXISTS idx_service_import_sources_provider ON service_import_sources(provider, external_project_id, external_environment_id, external_service_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
