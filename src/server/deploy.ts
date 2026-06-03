@@ -31,6 +31,7 @@ import { ensureProjectRuntimeNetwork, runtimeNetworkArgs } from "./runtime-netwo
 import { railpackBuildEnv, railpackBuildEnvArgs } from "./railpack-build-env.js";
 import { saveRedisDatasetIfRunning, stopRedisContainerForReplacement } from "./redis-persistence.js";
 import { deploymentConcurrency } from "./system-settings.js";
+import { buildkitStartHint, ensureBuildkitRunning } from "./buildkit.js";
 
 type RunOptions = {
   cwd?: string;
@@ -191,46 +192,15 @@ function cloneUrlWithToken(repoUrl: string, token?: string | null) {
   return url.toString();
 }
 
-function parseTcpTarget(address: string) {
-  const match = address.match(/^tcp:\/\/([^:/]+):(\d+)$/i);
-  if (!match) return null;
-  return { host: match[1], port: Number(match[2]) };
-}
-
-function isBuildkitReachable(address: string, timeoutMs = 600) {
-  const target = parseTcpTarget(address);
-  if (!target) {
-    return Promise.resolve(false);
+async function ensureBuildkitAvailable(deploymentId: string) {
+  const recovery = await ensureBuildkitRunning(config.buildkitHost);
+  if (recovery.ok) {
+    if (recovery.recovered) appendDeploymentLog(deploymentId, recovery.detail);
+    return;
   }
 
-  return new Promise<boolean>((resolve) => {
-    const socket = new net.Socket();
-    let settled = false;
-
-    const finish = (value: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(value);
-    };
-
-    socket.setTimeout(timeoutMs);
-    socket.once("connect", () => finish(true));
-    socket.once("timeout", () => finish(false));
-    socket.once("error", () => finish(false));
-    socket.connect(target.port, target.host);
-  });
-}
-
-function buildkitStartHint() {
-  return "docker run --rm --privileged -d --name deploy-buildkit -p 127.0.0.1:1234:1234 moby/buildkit:latest --addr tcp://0.0.0.0:1234";
-}
-
-async function ensureBuildkitAvailable(deploymentId: string) {
-  const reachable = await isBuildkitReachable(config.buildkitHost);
-  if (reachable) return;
-
   appendDeploymentLog(deploymentId, `BuildKit is unavailable at ${config.buildkitHost}.`, "stderr");
+  appendDeploymentLog(deploymentId, recovery.detail, "stderr");
   appendDeploymentLog(deploymentId, `Start it with: ${buildkitStartHint()}`, "stderr");
   throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
 }
@@ -399,11 +369,8 @@ function getEnvForService(serviceId: string) {
 }
 
 function urlForHostname(hostname: string) {
-  const isLocal =
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
-  return `${isLocal ? "http" : "https"}://${hostname}`;
+  const isIpv4Address = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+  return `${isIpv4Address ? "http" : "https"}://${hostname}`;
 }
 
 function preferredServiceUrl(service: Service) {
