@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import { startRailwayPostgresDataImportJob } from "./database-data-imports.js";
+import { prepareRailwayPostgresDataImport, startRailwayPostgresDataImportJob } from "./database-data-imports.js";
 import { db } from "./db.js";
 import { enqueueDeployment, getServiceById } from "./deploy.js";
 import { deployments } from "./schema.js";
@@ -38,7 +39,7 @@ async function waitForDeploymentsToSettle(deploymentIds: string[]) {
 function serviceReadyForRailwayDataImport(serviceId: string) {
   const service = getServiceById(serviceId);
   if (!service || !isDatabaseService(service)) return false;
-  return service.status === "active" && databaseTypeForService(service) === "postgres";
+  return service.status === "active" && isPostgresFamilyDatabase(databaseTypeForService(service));
 }
 
 function queueDeployments(serviceIds: string[]) {
@@ -47,6 +48,16 @@ function queueDeployments(serviceIds: string[]) {
 
 async function runRailwayImportAutomation(input: RailwayImportAutomationInput) {
   let databaseDeploymentIds: string[] = [];
+
+  if (input.importDatabaseData && input.databaseServiceIds.length > 0) {
+    for (const serviceId of input.databaseServiceIds) {
+      try {
+        await prepareRailwayPostgresDataImport(serviceId, input.railwayToken);
+      } catch (error) {
+        console.warn("Railway database import preparation failed:", error);
+      }
+    }
+  }
 
   if (input.autoDeploy && input.databaseServiceIds.length > 0) {
     databaseDeploymentIds = queueDeployments(input.databaseServiceIds).map((deployment) => deployment.id);
