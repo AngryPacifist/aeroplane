@@ -14,6 +14,7 @@ import { ModalShell } from "../../components/modals/modal-shell";
 import { Checkbox } from "../../components/ui/checkbox";
 import { Dropdown } from "../../components/ui/dropdown";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../../components/ui/primitives";
+import { RailwayMigrationOptions } from "./railway-migration-options";
 
 interface RailwayProject {
   id: string;
@@ -52,6 +53,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>("");
   const [excludeRailwayVars, setExcludeRailwayVars] = useState(true);
   const [importDatabases, setImportDatabases] = useState(true);
+  const [autoDeploy, setAutoDeploy] = useState(true);
+  const [importDatabaseData, setImportDatabaseData] = useState(true);
 
   useEffect(() => {
     if (open) {
@@ -103,6 +106,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
       setSelectedEnvironmentId(details.environments[0]?.id || "");
       setExcludeRailwayVars(true);
       setImportDatabases(true);
+      setAutoDeploy(true);
+      setImportDatabaseData(true);
       
       setStep("configure");
     } catch (err) {
@@ -122,6 +127,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
         environmentId: selectedEnvironmentId,
         excludeRailwayVars,
         importDatabases,
+        autoDeploy,
+        importDatabaseData: importDatabaseData && importDatabases && autoDeploy,
         selectedServiceIds
       };
       const result = await api.railwayImport(apiToken.trim(), selectedProject.id, config);
@@ -147,6 +154,8 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
     setProjectDetails(null);
     setSelectedServiceIds([]);
     setSelectedEnvironmentId("");
+    setAutoDeploy(true);
+    setImportDatabaseData(true);
     onClose();
   }
 
@@ -328,29 +337,23 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
               </div>
             </div>
 
-            <div className="flex flex-col justify-end space-y-2.5 pb-1">
-              <Checkbox
-                checked={excludeRailwayVars}
-                onChange={setExcludeRailwayVars}
-                disabled={busy}
-                label="Exclude RAILWAY_* variables"
-              >
-                <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
-                  Exclude RAILWAY_* variables
-                </span>
-              </Checkbox>
-
-              <Checkbox
-                checked={importDatabases}
-                onChange={setImportDatabases}
-                disabled={busy}
-                label="Recreate database engines"
-              >
-                <span className="text-xs text-zinc-300 font-semibold font-mono uppercase tracking-wider">
-                  Recreate database engines
-                </span>
-              </Checkbox>
-            </div>
+            <RailwayMigrationOptions
+              busy={busy}
+              excludeRailwayVars={excludeRailwayVars}
+              importDatabases={importDatabases}
+              autoDeploy={autoDeploy}
+              importDatabaseData={importDatabaseData}
+              onExcludeRailwayVarsChange={setExcludeRailwayVars}
+              onImportDatabasesChange={(checked) => {
+                setImportDatabases(checked);
+                if (!checked) setImportDatabaseData(false);
+              }}
+              onAutoDeployChange={(checked) => {
+                setAutoDeploy(checked);
+                if (!checked) setImportDatabaseData(false);
+              }}
+              onImportDatabaseDataChange={setImportDatabaseData}
+            />
           </div>
 
           <div>
@@ -442,7 +445,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
           <div className="text-[10px] text-zinc-500 font-mono space-y-1">
             <div>Fetching services, command overrides, and app variable maps...</div>
             <div>Generating self-hosted database credentials...</div>
-            <div>Generating transparent Caddy reverse proxies...</div>
+            <div>Importing custom domains and queueing deploys...</div>
           </div>
         </div>
       )}
