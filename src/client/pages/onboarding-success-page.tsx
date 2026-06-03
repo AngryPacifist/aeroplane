@@ -20,7 +20,7 @@ function statusTone(active: boolean) {
 }
 
 function hostnameUrl(hostname: string) {
-  return hostname.endsWith(".localhost") ? `http://${hostname}` : `https://${hostname}`;
+  return `https://${hostname}`;
 }
 
 function SummaryRow({
