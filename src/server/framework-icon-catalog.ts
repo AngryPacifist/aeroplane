@@ -4,6 +4,7 @@ export type FrameworkIconCatalogEntry = {
   name: string;
   search: string;
   slug: string;
+  sourceUrl?: string;
   sourcePath?: string;
   titleAliases?: string[];
   website?: string;
@@ -71,10 +72,25 @@ export const FRAMEWORK_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
 
 export const DATABASE_ICON_CATALOG: FrameworkIconCatalogEntry[] = [
   { slug: "postgres", name: "PostgreSQL", search: "PostgreSQL", sourcePath: "postgresql.svg", titleAliases: ["PostgreSQL"], website: "https://www.postgresql.org/" },
+  {
+    slug: "timescale",
+    name: "TimescaleDB",
+    search: "TimescaleDB",
+    sourceUrl: "https://assets.tigerdata.com/timescale-web/brand/tiger-data/flat-logos/logo-badge-yellow.svg",
+    titleAliases: ["TimescaleDB", "Timescale", "Tiger Data"],
+    website: "https://www.tigerdata.com/"
+  },
   { slug: "mysql", name: "MySQL", search: "MySQL", sourcePath: "mysql-icon-dark.svg", titleAliases: ["MySQL"], website: "https://www.mysql.com/" },
   { slug: "redis", name: "Redis", search: "Redis", sourcePath: "redis.svg", titleAliases: ["Redis"], website: "https://redis.io/" },
   { slug: "mongodb", name: "MongoDB", search: "MongoDB", sourcePath: "mongodb-icon-dark.svg", titleAliases: ["MongoDB"], website: "https://www.mongodb.com/" },
-  { slug: "clickhouse", name: "ClickHouse", search: "ClickHouse", titleAliases: ["ClickHouse"], website: "https://clickhouse.com/" }
+  {
+    slug: "clickhouse",
+    name: "ClickHouse",
+    search: "ClickHouse",
+    sourceUrl: "https://cdn.simpleicons.org/clickhouse/FFCC01",
+    titleAliases: ["ClickHouse"],
+    website: "https://clickhouse.com/"
+  }
 ];
 
 export function frameworkIconEntryForSlug(slug: string) {
