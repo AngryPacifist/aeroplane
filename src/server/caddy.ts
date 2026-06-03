@@ -13,8 +13,12 @@ function shellWords(command: string) {
   return command.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
 }
 
-function caddyAddress(hostname: string) {
-  return hostname === "localhost" || hostname.endsWith(".localhost") ? `http://${hostname}` : hostname;
+function isLocalHostname(hostname: string) {
+  return hostname === "localhost" || hostname.endsWith(".localhost");
+}
+
+function caddyTlsConfig(hostname: string) {
+  return isLocalHostname(hostname) ? "  tls internal\n" : "";
 }
 
 function staticSiteDirForService(serviceId: string) {
@@ -37,8 +41,8 @@ function controlPlaneBlock() {
   const hostname = currentControlPlaneHostname();
   if (!hostname) return null;
 
-  return `${caddyAddress(hostname)} {
-  encode zstd gzip
+  return `${hostname} {
+${caddyTlsConfig(hostname)}  encode zstd gzip
   reverse_proxy 127.0.0.1:${config.port}
 }`;
 }
@@ -74,8 +78,8 @@ export function renderCaddyfile() {
     if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
 
     if (row.staticOutput) {
-      blocks.push(`${caddyAddress(row.hostname)} {
-  root * ${staticSiteDirForService(row.serviceId)}
+      blocks.push(`${row.hostname} {
+${caddyTlsConfig(row.hostname)}  root * ${staticSiteDirForService(row.serviceId)}
   try_files {path} {path}/ /index.html
   file_server
 }`);
@@ -83,8 +87,8 @@ export function renderCaddyfile() {
     }
 
     const targetPort = row.activePort ?? row.hostPort;
-    blocks.push(`${caddyAddress(row.hostname)} {
-  encode zstd gzip
+    blocks.push(`${row.hostname} {
+${caddyTlsConfig(row.hostname)}  encode zstd gzip
   reverse_proxy 127.0.0.1:${targetPort}
 }`);
   }
