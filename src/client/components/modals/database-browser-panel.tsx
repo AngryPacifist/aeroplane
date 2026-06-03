@@ -1,6 +1,6 @@
 import { Add01Icon, DatabaseImportIcon, MoreVerticalIcon, Refresh03Icon } from "@hugeicons/core-free-icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { api, type DatabaseColumn, type DatabaseRow, type DatabaseRowFilter, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
+import { api, type DatabaseColumn, type DatabaseDataImport, type DatabaseRow, type DatabaseRowFilter, type DatabaseRowsResponse, type DatabaseTable } from "../../api";
 import { Dropdown } from "../ui/dropdown";
 import { AppIcon, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet, validRedisType } from "./database-insert-sheet";
@@ -8,6 +8,7 @@ import { PostgresDataImportModal } from "./postgres-data-import-modal";
 import { DatabaseTableGrid } from "./database-table-grid";
 import { MongoDocumentList } from "./mongo-document-list";
 import { MongoDocumentModal } from "./mongo-document-modal";
+import { DatabaseImportStatusBanner } from "./database-import-status-banner";
 
 function rowValue(value: unknown) {
   if (value === null || value === undefined) return "";
@@ -61,6 +62,8 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const [mongoQuery, setMongoQuery] = useState("");
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [dataImports, setDataImports] = useState<DatabaseDataImport[]>([]);
+  const [dismissedDataImportIds, setDismissedDataImportIds] = useState<Set<string>>(new Set());
 
   const columns = rowsResult?.columns ?? [];
   const rows = rowsResult?.rows ?? [];
@@ -70,6 +73,11 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const isMongo = engine === "mongodb" || engine === "mongo";
   const canImportData = engine === "postgres";
   const canAddDocument = isRedis || isMongo;
+  const latestDataImport = dataImports[0] ?? null;
+  const activeDataImport = dataImports.find((dataImport) => (
+    (dataImport.status === "queued" || dataImport.status === "running") && !dismissedDataImportIds.has(dataImport.id)
+  )) ?? null;
+  const visibleDataImport = activeDataImport ?? (latestDataImport && !dismissedDataImportIds.has(latestDataImport.id) ? latestDataImport : null);
 
   const selectedTableName = useMemo(() => {
     return tables.find((table) => table.id === selectedTable)?.name ?? selectedTable;
@@ -114,6 +122,15 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
       setError(issue instanceof Error ? issue.message : "Could not load database tables");
     } finally {
       setBusy("");
+    }
+  }
+
+  async function loadDataImports() {
+    try {
+      const result = await api.databaseDataImports(serviceId);
+      setDataImports(result.imports);
+    } catch {
+      setDataImports([]);
     }
   }
 
@@ -203,9 +220,23 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setMongoQuery("");
     setOptionsOpen(false);
     setImportOpen(false);
+    setDataImports([]);
+    setDismissedDataImportIds(new Set());
     setPageOffset(0);
     void loadTables();
+    void loadDataImports();
   }, [serviceId]);
+
+  useEffect(() => {
+    const activeImport = dataImports.some((dataImport) => dataImport.status === "queued" || dataImport.status === "running");
+    if (!activeImport) return;
+
+    const interval = window.setInterval(() => {
+      void loadDataImports();
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [dataImports, serviceId]);
 
   useEffect(() => {
     if (selectedTable) {
@@ -239,6 +270,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
     setAppliedFilters([]);
     setMongoQuery("");
     setPageOffset(0);
+    await loadDataImports();
     await loadTables();
   }
 
@@ -463,6 +495,12 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
           </div>
         </div>
 
+        {visibleDataImport ? (
+          <DatabaseImportStatusBanner
+            dataImport={visibleDataImport}
+            onDismiss={() => setDismissedDataImportIds((current) => new Set(current).add(visibleDataImport.id))}
+          />
+        ) : null}
         {error ? <div className="mb-4 border border-rose-500/30 bg-rose-950/25 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
         {!hasPrimaryKey && editable && rows.length > 0 ? (
           <div className="mb-4 border border-amber-500/30 bg-amber-950/20 px-4 py-3 text-xs text-amber-200">
