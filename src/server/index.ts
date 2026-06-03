@@ -451,11 +451,8 @@ function checkPortReachable(port: number, host = "127.0.0.1", timeoutMs = 350) {
 }
 
 function urlForHostname(hostname: string) {
-  const isLocal =
-    hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
-  return `${isLocal ? "http" : "https"}://${hostname}`;
+  const isIpv4Address = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+  return `${isIpv4Address ? "http" : "https"}://${hostname}`;
 }
 
 async function publicService(service: Service) {
@@ -1495,17 +1492,9 @@ app.get("/api/services/:serviceId/overview", async (c) => {
         })
       );
 
-  const publicFacingService = await publicService(service);
-  const normalizedDeployments =
-    publicFacingService.status === "failed"
-      ? serviceDeployments.map((deployment) =>
-          deployment.status === "running" ? { ...deployment, status: "failed" } : deployment
-        )
-      : serviceDeployments;
-
   return c.json({
-    service: publicFacingService,
-    deployments: normalizedDeployments,
+    service: await publicService(service),
+    deployments: serviceDeployments,
     env: serviceEnv,
     domains: updatedDomains,
     publicIp: cachedPublicIp
