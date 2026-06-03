@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
+import { importedTimescaleSourceImageForService } from "./database-source-image.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
+import { databaseDataVolumeName } from "./database-runtime.js";
 import { runDockerExec } from "./database-viewer-shared.js";
 import { containerNameForService, getServiceById } from "./deploy.js";
 import { db } from "./db.js";
 import { getRailwayServiceVariables } from "./railway-importer.js";
-import { getRailwayImportSource } from "./service-import-sources.js";
+import { getRailwayImportSource, mergeRailwayImportSourceMetadata } from "./service-import-sources.js";
 import { envVars, type Service } from "./schema.js";
 
 const postgresDumpImage = "postgres:18-alpine";
@@ -36,6 +39,25 @@ type PostgresUrlCandidate = {
   key: string;
   value: string;
   internal: boolean;
+};
+
+type PostgresDumpOptions = {
+  excludeTimescaleBackgroundJobs?: boolean;
+  sourceInfo?: PostgresSourceInfo;
+};
+
+type PostgresSourceInfo = {
+  major: number | null;
+  timescaleVersion: string | null;
+};
+
+type PostgresTargetContext = {
+  containerName: string;
+  dbName: string;
+  dbType: string;
+  envMap: Map<string, string>;
+  password: string;
+  user: string;
 };
 
 function runDocker(args: string[]) {
@@ -73,8 +95,8 @@ function postgresService(serviceId: string) {
   }
 
   const dbType = databaseTypeForService(service);
-  if (dbType !== "postgres") {
-    throw new Error("Postgres data import is only available for Postgres services.");
+  if (!isPostgresFamilyDatabase(dbType)) {
+    throw new Error("Postgres data import is only available for Postgres-compatible services.");
   }
 
   return service;
@@ -126,7 +148,15 @@ function redactUrl(message: string, sourceUrl: string) {
   return nextMessage;
 }
 
-async function readSourcePostgresMajor(sourceUrl: string) {
+function timescaleBackgroundJobExcludes() {
+  return [
+    "--exclude-table-data=_timescaledb_catalog.bgw_job",
+    "--exclude-table-data=_timescaledb_config.bgw_job",
+    "--exclude-table-data=_timescaledb_cache.bgw_job"
+  ].join(" ");
+}
+
+async function readSourcePostgresInfo(sourceUrl: string): Promise<PostgresSourceInfo> {
   try {
     const result = await runDocker([
       "run",
@@ -138,21 +168,26 @@ async function readSourcePostgresMajor(sourceUrl: string) {
       postgresDumpImage,
       "sh",
       "-lc",
-      "psql --dbname=\"$SOURCE_DATABASE_URL\" --tuples-only --no-align --command='SHOW server_version_num'"
+      "psql -X --dbname=\"$SOURCE_DATABASE_URL\" --tuples-only --no-align --command=\"SELECT current_setting('server_version_num') || '|' || coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')\""
     ]);
-    return postgresMajorVersion(result.stdout);
+    const [versionNum = "", timescaleVersion = ""] = result.stdout.trim().split("|");
+    return {
+      major: postgresMajorVersion(versionNum),
+      timescaleVersion: timescaleVersion.trim() || null
+    };
   } catch {
-    return null;
+    return { major: null, timescaleVersion: null };
   }
 }
 
-async function dumpPostgresUrl(sourceUrl: string) {
+async function dumpPostgresUrl(sourceUrl: string, options: PostgresDumpOptions = {}) {
   const tempDir = await mkdtemp(join(tmpdir(), "aeroplane-postgres-import-"));
   const dumpPath = join(tempDir, "source.dump");
   const containerName = `aeroplane-pg-dump-${nanoid(10)}`;
   const remotePath = "/tmp/source.dump";
   await runDocker(["pull", postgresDumpImage]);
-  const sourceMajor = await readSourcePostgresMajor(sourceUrl);
+  const sourceInfo = options.sourceInfo ?? await readSourcePostgresInfo(sourceUrl);
+  const timescaleExcludes = options.excludeTimescaleBackgroundJobs ? ` ${timescaleBackgroundJobExcludes()}` : "";
 
   try {
     await runDocker(["rm", "-f", containerName]).catch(() => undefined);
@@ -167,7 +202,7 @@ async function dumpPostgresUrl(sourceUrl: string) {
       postgresDumpImage,
       "sh",
       "-lc",
-      `set -eu; pg_dump --dbname="$SOURCE_DATABASE_URL" --format=custom --no-owner --no-acl --file=${remotePath}; test -s ${remotePath}`
+      `set -eu; pg_dump --dbname="$SOURCE_DATABASE_URL" --format=custom --no-owner --no-acl --no-tablespaces${timescaleExcludes} --file=${remotePath}; test -s ${remotePath}`
     ]);
     await runDocker(["cp", `${containerName}:${remotePath}`, dumpPath]);
   } catch (error) {
@@ -183,7 +218,7 @@ async function dumpPostgresUrl(sourceUrl: string) {
     throw new Error("Postgres dump was not created or was empty.");
   }
 
-  return { tempDir, dumpPath, sourceMajor };
+  return { tempDir, dumpPath, sourceInfo };
 }
 
 async function readTargetPostgresMajor(service: Service, envMap: Map<string, string>, containerName: string) {
@@ -194,6 +229,7 @@ async function readTargetPostgresMajor(service: Service, envMap: Map<string, str
     containerName,
     [
       "psql",
+      "-X",
       "-h",
       "127.0.0.1",
       "-p",
@@ -219,23 +255,179 @@ async function waitForTargetPostgres(service: Service, containerName: string, us
   }
 }
 
-async function restorePostgresDump(service: Service, dumpPath: string, sourceMajor: number | null) {
+function targetPostgresContext(service: Service, dbType: string): PostgresTargetContext {
   const envMap = envMapForService(service.id);
   const containerName = containerNameForService(service.id);
-  const remotePath = `/tmp/aeroplane-data-import-${nanoid(10)}-${basename(dumpPath)}`;
   const user = envMap.get("POSTGRES_USER") || "postgres";
   const password = envMap.get("POSTGRES_PASSWORD") || "";
   const dbName = envMap.get("POSTGRES_DB") || "aeroplane";
+  return { containerName, dbName, dbType, envMap, password, user };
+}
 
-  await waitForTargetPostgres(service, containerName, user);
-  const targetMajor = await readTargetPostgresMajor(service, envMap, containerName).catch(() => null);
-  if (sourceMajor && targetMajor && targetMajor < sourceMajor) {
-    throw new Error(`Target Postgres ${targetMajor} is older than source Postgres ${sourceMajor}. Redeploy this Aeroplane Postgres service with the current image, then run the import again.`);
+async function runTargetPostgresSql(service: Service, ctx: PostgresTargetContext, sql: string) {
+  await runDockerExec(
+    ctx.containerName,
+    [
+      "psql",
+      "-X",
+      "-h",
+      "127.0.0.1",
+      "-p",
+      String(service.internalPort),
+      "-U",
+      ctx.user,
+      "-d",
+      ctx.dbName,
+      "-v",
+      "ON_ERROR_STOP=1",
+      "--command",
+      sql
+    ],
+    { PGPASSWORD: ctx.password }
+  );
+}
+
+async function readTargetPostgresScalar(service: Service, ctx: PostgresTargetContext, sql: string) {
+  const result = await runDockerExec(
+    ctx.containerName,
+    [
+      "psql",
+      "-X",
+      "-h",
+      "127.0.0.1",
+      "-p",
+      String(service.internalPort),
+      "-U",
+      ctx.user,
+      "-d",
+      ctx.dbName,
+      "--tuples-only",
+      "--no-align",
+      "--command",
+      sql
+    ],
+    { PGPASSWORD: ctx.password }
+  );
+  return result.stdout.trim();
+}
+
+async function readTargetTimescaleVersion(service: Service, ctx: PostgresTargetContext) {
+  const version = await readTargetPostgresScalar(service, ctx, "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb';").catch(() => "");
+  return version.trim() || null;
+}
+
+function recommendedTimescaleImage(sourceInfo: PostgresSourceInfo, service: Service) {
+  if (sourceInfo.timescaleVersion && sourceInfo.major) {
+    return `timescale/timescaledb:${sourceInfo.timescaleVersion}-pg${sourceInfo.major}`;
   }
-  await runDocker(["cp", dumpPath, `${containerName}:${remotePath}`]);
+  return importedTimescaleSourceImageForService(service);
+}
+
+function persistTimescaleSourceImage(service: Service, dbType: string, sourceInfo: PostgresSourceInfo) {
+  if (dbType !== "timescale" || !sourceInfo.timescaleVersion || !sourceInfo.major) return null;
+
+  const sourceImage = recommendedTimescaleImage(sourceInfo, service);
+  if (!sourceImage) return null;
+
+  mergeRailwayImportSourceMetadata(service.id, {
+    sourceImage,
+    sourcePostgresMajor: sourceInfo.major,
+    sourceTimescaleVersion: sourceInfo.timescaleVersion
+  });
+  return sourceImage;
+}
+
+function assertTimescaleRestoreCompatible(service: Service, sourceInfo: PostgresSourceInfo, targetTimescaleVersion: string | null) {
+  if (!sourceInfo.timescaleVersion || !targetTimescaleVersion || sourceInfo.timescaleVersion === targetTimescaleVersion) {
+    return;
+  }
+
+  const image = recommendedTimescaleImage(sourceInfo, service);
+  const containerName = containerNameForService(service.id);
+  const volumeName = databaseDataVolumeName(service.id);
+  const imageHint = image
+    ? ` The service is pinned to ${image}, but the running target still has the old extension loaded.`
+    : " Recreate the target with the same TimescaleDB extension version as the source before retrying.";
+
+  throw new Error(
+    `TimescaleDB extension versions differ (source ${sourceInfo.timescaleVersion}, target ${targetTimescaleVersion}). Timescale logical imports require the target extension version to match the source before restore.${imageHint} Reset this local target with: docker rm -f ${containerName}; docker volume rm ${volumeName}; then redeploy this Timescale service and retry the import.`
+  );
+}
+
+function shouldSkipTimescaleRestoreListEntry(line: string) {
+  const normalized = line.replace(/\s+/g, " ").trim();
+  const timescaleBackgroundJobEntry = /\b_timescaledb_(catalog|config|cache)\b.*\bbgw_job\b/.test(normalized);
+  return (
+    /\bEXTENSION - timescaledb\b/.test(normalized) ||
+    /\bCOMMENT - EXTENSION timescaledb\b/.test(normalized) ||
+    (/\bTABLE DATA\b/.test(normalized) && timescaleBackgroundJobEntry) ||
+    (/\bSEQUENCE SET\b/.test(normalized) && /\bbgw_job_id_seq\b/.test(normalized))
+  );
+}
+
+async function createTimescaleRestoreList(containerName: string, remoteDumpPath: string) {
+  const list = await runDockerExec(containerName, ["pg_restore", "-l", remoteDumpPath]);
+  const filteredList = list.stdout
+    .split(/\r?\n/)
+    .filter((line) => !shouldSkipTimescaleRestoreListEntry(line))
+    .join("\n");
+  const localListPath = join(tmpdir(), `aeroplane-timescale-restore-${nanoid(10)}.list`);
+  const remoteListPath = `/tmp/aeroplane-timescale-restore-${nanoid(10)}.list`;
+
   try {
+    writeFileSync(localListPath, `${filteredList}\n`);
+    await runDocker(["cp", localListPath, `${containerName}:${remoteListPath}`]);
+    return remoteListPath;
+  } finally {
+    rmSync(localListPath, { force: true });
+  }
+}
+
+async function assertTargetPostgresImportCompatible(service: Service, dbType: string, sourceInfo: PostgresSourceInfo) {
+  const ctx = targetPostgresContext(service, dbType);
+  await waitForTargetPostgres(service, ctx.containerName, ctx.user);
+
+  const targetMajor = await readTargetPostgresMajor(service, ctx.envMap, ctx.containerName).catch(() => null);
+  if (sourceInfo.major && targetMajor && targetMajor < sourceInfo.major) {
+    throw new Error(`Target Postgres ${targetMajor} is older than source Postgres ${sourceInfo.major}. Redeploy this Aeroplane Postgres service with the current image, then run the import again.`);
+  }
+
+  if (dbType === "timescale") {
+    await runTargetPostgresSql(service, ctx, "CREATE EXTENSION IF NOT EXISTS timescaledb;");
+    const targetTimescaleVersion = await readTargetTimescaleVersion(service, ctx);
+    assertTimescaleRestoreCompatible(service, sourceInfo, targetTimescaleVersion);
+  }
+}
+
+async function restorePostgresDump(service: Service, dbType: string, dumpPath: string, sourceInfo: PostgresSourceInfo) {
+  const ctx = targetPostgresContext(service, dbType);
+  const remotePath = `/tmp/aeroplane-data-import-${nanoid(10)}-${basename(dumpPath)}`;
+  const timescaleTarget = dbType === "timescale";
+  let remoteListPath: string | null = null;
+  let timescaleRestorePrepared = false;
+  let restoreError: unknown = null;
+
+  await waitForTargetPostgres(service, ctx.containerName, ctx.user);
+  const targetMajor = await readTargetPostgresMajor(service, ctx.envMap, ctx.containerName).catch(() => null);
+  if (sourceInfo.major && targetMajor && targetMajor < sourceInfo.major) {
+    throw new Error(`Target Postgres ${targetMajor} is older than source Postgres ${sourceInfo.major}. Redeploy this Aeroplane Postgres service with the current image, then run the import again.`);
+  }
+
+  if (timescaleTarget) {
+    await runTargetPostgresSql(service, ctx, "CREATE EXTENSION IF NOT EXISTS timescaledb;");
+    const targetTimescaleVersion = await readTargetTimescaleVersion(service, ctx);
+    assertTimescaleRestoreCompatible(service, sourceInfo, targetTimescaleVersion);
+    await runTargetPostgresSql(service, ctx, "SELECT timescaledb_pre_restore();");
+    timescaleRestorePrepared = true;
+  }
+
+  await runDocker(["cp", dumpPath, `${ctx.containerName}:${remotePath}`]);
+  try {
+    remoteListPath = timescaleTarget ? await createTimescaleRestoreList(ctx.containerName, remotePath) : null;
+    const restoreListArgs = remoteListPath ? [`--use-list=${remoteListPath}`] : [];
+    const cleanArgs = timescaleTarget ? [] : ["--clean", "--if-exists"];
     await runDockerExec(
-      containerName,
+      ctx.containerName,
       [
         "pg_restore",
         "-h",
@@ -243,31 +435,55 @@ async function restorePostgresDump(service: Service, dumpPath: string, sourceMaj
         "-p",
         String(service.internalPort),
         "-U",
-        user,
+        ctx.user,
         "-d",
-        dbName,
-        "--clean",
-        "--if-exists",
+        ctx.dbName,
+        ...cleanArgs,
         "--no-owner",
         "--no-acl",
+        "--no-tablespaces",
+        ...restoreListArgs,
         remotePath
       ],
-      { PGPASSWORD: password }
+      { PGPASSWORD: ctx.password }
     );
+  } catch (error) {
+    restoreError = error;
   } finally {
-    await runDockerExec(containerName, ["rm", "-f", remotePath]).catch(() => undefined);
+    if (timescaleRestorePrepared) {
+      try {
+        await runTargetPostgresSql(service, ctx, "SELECT timescaledb_post_restore();");
+      } catch (error) {
+        restoreError ??= error;
+      }
+    }
+    if (remoteListPath) {
+      await runDockerExec(ctx.containerName, ["rm", "-f", remoteListPath]).catch(() => undefined);
+    }
+    await runDockerExec(ctx.containerName, ["rm", "-f", remotePath]).catch(() => undefined);
+  }
+
+  if (restoreError) {
+    throw restoreError instanceof Error ? restoreError : new Error(String(restoreError));
   }
 }
 
 async function importPostgresDumpedUrl(serviceId: string, sourceUrl: string, source: "postgres-url" | "railway", sourceLabel: string, sourceVariableKey?: string) {
   assertReachableSourceUrl(sourceUrl);
   const service = postgresService(serviceId);
-  const { tempDir, dumpPath, sourceMajor } = await dumpPostgresUrl(sourceUrl);
+  const dbType = databaseTypeForService(service);
+  const sourceInfo = await readSourcePostgresInfo(sourceUrl);
+  persistTimescaleSourceImage(service, dbType, sourceInfo);
+  await assertTargetPostgresImportCompatible(service, dbType, sourceInfo);
+  const { tempDir, dumpPath } = await dumpPostgresUrl(sourceUrl, {
+    excludeTimescaleBackgroundJobs: dbType === "timescale",
+    sourceInfo
+  });
 
   try {
     const stats = statSync(dumpPath);
     const checksum = fileSha256(dumpPath);
-    await restorePostgresDump(service, dumpPath, sourceMajor);
+    await restorePostgresDump(service, dbType, dumpPath, sourceInfo);
     return {
       ok: true,
       serviceId,
@@ -281,6 +497,22 @@ async function importPostgresDumpedUrl(serviceId: string, sourceUrl: string, sou
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+export async function preparePostgresDataImportFromRailway(serviceId: string, token: string) {
+  const service = postgresService(serviceId);
+  const dbType = databaseTypeForService(service);
+  if (dbType !== "timescale") return null;
+
+  const source = getRailwayImportSource(serviceId);
+  if (!source?.externalProjectId || !source.externalEnvironmentId) return null;
+
+  const variables = await getRailwayServiceVariables(token, source.externalProjectId, source.externalEnvironmentId, source.externalServiceId);
+  const candidate = findRailwayPostgresUrl(variables);
+  if (candidate.internal) return null;
+
+  const sourceInfo = await readSourcePostgresInfo(candidate.value);
+  return persistTimescaleSourceImage(service, dbType, sourceInfo);
 }
 
 function postgresUrlCandidate(key: string, value: unknown): PostgresUrlCandidate | null {
