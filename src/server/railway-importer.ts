@@ -413,6 +413,7 @@ ${serviceInstanceCommandSelection}
     const lowercaseName = serviceName.toLowerCase();
     if (!repoUrl) {
       if (
+        lowercaseName.includes("timescale") ||
         lowercaseName.includes("postgres") ||
         lowercaseName.includes("mysql") ||
         lowercaseName.includes("redis") ||
@@ -423,23 +424,9 @@ ${serviceInstanceCommandSelection}
         }
         isDatabase = true;
         repoUrl = "database";
-        if (lowercaseName.includes("postgres")) {
-          const dbType = "postgres";
-          repoFullName = `database:${dbType}`;
-          internalPort = defaultDatabasePort(dbType);
-        } else if (lowercaseName.includes("mysql")) {
-          const dbType = "mysql";
-          repoFullName = `database:${dbType}`;
-          internalPort = defaultDatabasePort(dbType);
-        } else if (lowercaseName.includes("redis")) {
-          const dbType = "redis";
-          repoFullName = `database:${dbType}`;
-          internalPort = defaultDatabasePort(dbType);
-        } else if (lowercaseName.includes("mongo")) {
-          const dbType = "mongodb";
-          repoFullName = `database:${dbType}`;
-          internalPort = defaultDatabasePort(dbType);
-        }
+        const dbType = normalizeDatabaseType(lowercaseName);
+        repoFullName = `database:${dbType}`;
+        internalPort = defaultDatabasePort(dbType);
       } else {
         // Fallback placeholder repo
         repoUrl = "https://github.com/railpack/railpack";
