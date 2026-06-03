@@ -13,10 +13,9 @@ import { writeAndReloadCaddy } from "./caddy.js";
 import { getCloneTokenForRepo } from "./github-connect.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import {
-  databaseDataVolumeArg,
-  databaseImage
-} from "./database-runtime.js";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
+import { databaseDataVolumeArg } from "./database-runtime.js";
+import { databaseImageForService } from "./database-source-image.js";
 import { ensureStableDatabaseDataVolume } from "./database-volume-adoption.js";
 import { ensureDefaultDomainForService } from "./service-domains.js";
 import { runtimePortForService } from "./runtime-port.js";
@@ -211,6 +210,29 @@ async function ensureBuildkitAvailable(deploymentId: string) {
   appendDeploymentLog(deploymentId, recovery.detail, "stderr");
   appendDeploymentLog(deploymentId, `Start it with: ${buildkitStartHint()}`, "stderr");
   throw new Error(`BuildKit is unavailable at ${config.buildkitHost}`);
+}
+
+function dockerUnavailableMessage(detail: string) {
+  if (/orbstack/i.test(detail)) {
+    return "Docker is configured to use OrbStack, but the OrbStack Docker socket is unavailable. Start OrbStack, then retry the deployment.";
+  }
+
+  if (/docker daemon|docker api|Cannot connect|connect: no such file|connection refused/i.test(detail)) {
+    return "Docker is unavailable. Start Docker or switch to a working Docker context, then retry the deployment.";
+  }
+
+  return `Docker is unavailable: ${detail}`;
+}
+
+async function ensureDockerAvailable(deploymentId: string) {
+  const result = await runBufferedCommand("docker", ["version", "--format", "client {{.Client.Version}} / server {{.Server.Version}}"]);
+  if (result.code === 0) return;
+
+  const detail = (result.stderr || result.stdout || `docker version exited with ${result.code}`).trim();
+  const message = dockerUnavailableMessage(detail);
+  appendDeploymentLog(deploymentId, message, "stderr");
+  if (detail && detail !== message) appendDeploymentLog(deploymentId, detail, "stderr");
+  throw new Error(message);
 }
 
 function getEphemeralFreePort(): Promise<number> {
@@ -604,10 +626,10 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
   if (isDatabase) {
     const dbType = databaseTypeForService(service);
-    const officialImage = databaseImage(dbType);
+    const databaseImageName = databaseImageForService(service, dbType);
 
     db.update(deployments)
-      .set({ status: "building", startedAt, imageTag: officialImage, containerName })
+      .set({ status: "building", startedAt, imageTag: databaseImageName, containerName })
       .where(eq(deployments.id, deployment.id))
       .run();
     db.update(services).set({ status: "building", updatedAt: now() }).where(eq(services.id, service.id)).run();
@@ -615,6 +637,8 @@ async function runDeployment(deployment: Deployment, service: Service) {
     appendDeploymentLog(deployment.id, `Provisioning database service ${service.name} (${dbType})...`);
 
     try {
+      await ensureDockerAvailable(deployment.id);
+
       const redisPersistence = {
         containerName,
         password: env.REDIS_PASSWORD,
@@ -625,8 +649,10 @@ async function runDeployment(deployment: Deployment, service: Service) {
         warn: (line: string) => appendDeploymentLog(deployment.id, line, "stderr", secrets)
       };
 
-      appendDeploymentLog(deployment.id, `Pulling official image: ${officialImage}`);
-      await runCommand("docker", ["pull", officialImage], deployment.id);
+      const caddy = await writeAndReloadCaddy();
+      appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config written for database public hostnames." : `Caddy reload skipped/failed: ${caddy.detail}`);
+      appendDeploymentLog(deployment.id, `Pulling database image: ${databaseImageName}`);
+      await runCommand("docker", ["pull", databaseImageName], deployment.id);
       await ensureProjectRuntimeNetwork({
         service,
         containerNameForService,
@@ -660,11 +686,11 @@ async function runDeployment(deployment: Deployment, service: Service) {
       }
 
       const bindHost = "0.0.0.0";
-      const postgresTlsAssets = dbType === "postgres" ? await ensurePostgresTlsAssets(service) : null;
+      const postgresTlsAssets = isPostgresFamilyDatabase(dbType) ? await ensurePostgresTlsAssets(service) : null;
       if (postgresTlsAssets) {
         appendDeploymentLog(deployment.id, "Preparing Postgres TLS certificates...");
         await runCommand("docker", postgresTlsVolumeCreateDockerArgs(postgresTlsAssets), deployment.id);
-        const prep = postgresTlsVolumePrepareDockerPlan(officialImage, postgresTlsAssets);
+        const prep = postgresTlsVolumePrepareDockerPlan(databaseImageName, postgresTlsAssets);
         try {
           for (const args of prep.commands) {
             await runCommand("docker", args, deployment.id);
@@ -695,7 +721,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       for (const [key, value] of Object.entries(env)) {
         dockerArgs.push("--env", `${key}=${value}`);
       }
-      dockerArgs.push(officialImage);
+      dockerArgs.push(databaseImageName);
       if (postgresTlsAssets) {
         dockerArgs.push(...postgresTlsServerArgs());
       }
