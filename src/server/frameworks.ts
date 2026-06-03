@@ -1,4 +1,6 @@
 import { readRepoFile } from "./github-connect.js";
+import { DATABASE_ICON_CATALOG, FRAMEWORK_ICON_CATALOG, type FrameworkIconCatalogEntry } from "./framework-icon-catalog.js";
+import { cachedFrameworkIconMeta } from "./framework-icons.js";
 
 export type FrameworkMeta = {
   logoUrl: null | string;
@@ -10,103 +12,36 @@ export type FrameworkMeta = {
 type PackageJson = {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  name?: string;
   peerDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+  workspaces?: string[] | { packages?: string[] };
 };
-
-type SvglRoute = string | { dark?: string; light?: string };
-
-type SvglLogo = {
-  route: SvglRoute;
-  title: string;
-  url?: string;
-  wordmark?: SvglRoute;
-};
-
-type DetectionCandidate = {
-  match: (deps: Set<string>) => boolean;
-  name: string;
-  search: string;
-  slug: string;
-};
-
-const DETECTION_CANDIDATES: DetectionCandidate[] = [
-  { slug: "astro", name: "Astro", search: "Astro", match: (deps) => deps.has("astro") },
-  { slug: "nextjs", name: "Next.js", search: "Next.js", match: (deps) => deps.has("next") },
-  { slug: "nuxt", name: "Nuxt", search: "Nuxt", match: (deps) => deps.has("nuxt") },
-  { slug: "sveltekit", name: "SvelteKit", search: "SvelteKit", match: (deps) => deps.has("@sveltejs/kit") },
-  { slug: "solidstart", name: "SolidStart", search: "SolidStart", match: (deps) => deps.has("@solidjs/start") },
-  { slug: "remix", name: "Remix", search: "Remix", match: (deps) => deps.has("@remix-run/dev") || deps.has("@remix-run/react") },
-  { slug: "elysia", name: "Elysia", search: "Elysia", match: (deps) => deps.has("elysia") || [...deps].some((dep) => dep.startsWith("@elysiajs/")) },
-  { slug: "hono", name: "Hono", search: "Hono", match: (deps) => deps.has("hono") },
-  { slug: "nestjs", name: "NestJS", search: "NestJS", match: (deps) => deps.has("@nestjs/core") },
-  { slug: "fastify", name: "Fastify", search: "Fastify", match: (deps) => deps.has("fastify") },
-  { slug: "express", name: "Express", search: "Express", match: (deps) => deps.has("express") },
-  { slug: "vite", name: "Vite", search: "Vite", match: (deps) => deps.has("vite") },
-  { slug: "react", name: "React", search: "React", match: (deps) => deps.has("react") },
-  { slug: "vue", name: "Vue", search: "Vue", match: (deps) => deps.has("vue") },
-  { slug: "svelte", name: "Svelte", search: "Svelte", match: (deps) => deps.has("svelte") },
-  { slug: "angular", name: "Angular", search: "Angular", match: (deps) => deps.has("@angular/core") }
-];
 
 const frameworkCache = new Map<string, { expiresAt: number; value: FrameworkMeta | null }>();
-const svglCache = new Map<string, { expiresAt: number; value: FrameworkMeta | null }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
-function cacheKey(repoFullName: string, branch: string, rootDir: null | string) {
-  return `${repoFullName}::${branch}::${rootDir ?? ""}`;
+type FrameworkDetectionOptions = {
+  buildCommand?: null | string;
+  installCommand?: null | string;
+  serviceName?: null | string;
+  startCommand?: null | string;
+};
+
+type PackageJsonRead = {
+  packageJson: PackageJson;
+  path: string;
+};
+
+function detectionCommandSignature(options: FrameworkDetectionOptions = {}) {
+  return [options.installCommand, options.buildCommand, options.startCommand]
+    .map((command) => command?.trim() ?? "")
+    .filter(Boolean)
+    .join(" :: ");
 }
 
-function pickRoute(route: SvglRoute | undefined) {
-  if (!route) return null;
-  if (typeof route === "string") return route;
-  return route.dark ?? route.light ?? null;
-}
-
-async function resolveSvglLogo(candidate: DetectionCandidate): Promise<FrameworkMeta | null> {
-  const cached = svglCache.get(candidate.slug);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-
-  try {
-    const response = await fetch(`https://api.svgl.app?search=${encodeURIComponent(candidate.search)}`, {
-      headers: { Accept: "application/json" }
-    });
-    if (!response.ok) {
-      svglCache.set(candidate.slug, { value: null, expiresAt: Date.now() + CACHE_TTL_MS });
-      return null;
-    }
-
-    const results = (await response.json()) as SvglLogo[];
-    const normalizedSearch = candidate.search.toLowerCase();
-    const exact =
-      results.find((entry) => entry.title.toLowerCase() === normalizedSearch) ??
-      results.find((entry) => entry.title.toLowerCase().includes(normalizedSearch));
-
-    const value: FrameworkMeta | null = exact
-      ? {
-          slug: candidate.slug,
-          name: candidate.name,
-          logoUrl: pickRoute(exact.route) ?? pickRoute(exact.wordmark),
-          website: exact.url ?? null
-        }
-      : {
-          slug: candidate.slug,
-          name: candidate.name,
-          logoUrl: null,
-          website: null
-        };
-
-    svglCache.set(candidate.slug, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-    return value;
-  } catch {
-    const fallback = {
-      slug: candidate.slug,
-      name: candidate.name,
-      logoUrl: null,
-      website: null
-    };
-    svglCache.set(candidate.slug, { value: fallback, expiresAt: Date.now() + CACHE_TTL_MS });
-    return fallback;
-  }
+function cacheKey(repoFullName: string, branch: string, rootDir: null | string, options: FrameworkDetectionOptions = {}) {
+  return `${repoFullName}::${branch}::${rootDir ?? ""}::${detectionCommandSignature(options)}`;
 }
 
 function parsePackageJson(source: null | string) {
@@ -123,16 +58,118 @@ function packageJsonPaths(rootDir: null | string) {
   return normalizedRoot ? [`${normalizedRoot}/package.json`, "package.json"] : ["package.json"];
 }
 
-async function readPackageJsons(repoFullName: string, branch: string, rootDir: null | string) {
-  const packageJsons: PackageJson[] = [];
+function packageJsonDir(path: string) {
+  return path.endsWith("/package.json") ? path.slice(0, -"package.json".length).replace(/\/+$/g, "") : "";
+}
 
-  for (const path of packageJsonPaths(rootDir)) {
-    const content = await readRepoFile(repoFullName, branch, path);
-    const parsed = parsePackageJson(content);
-    if (parsed) packageJsons.push(parsed);
+function packageNameLeaf(value: string) {
+  const normalized = value.trim().replace(/^['"]|['"]$/g, "").replace(/^\.\/+/, "").replace(/\/+$/g, "");
+  const withoutGlob = normalized.replace(/\*+$/g, "").replace(/\/+$/g, "");
+  return withoutGlob.split("/").filter(Boolean).at(-1)?.replace(/^@/, "") ?? "";
+}
+
+function normalizedWorkspaceEntries(packageJson: PackageJson | null) {
+  const workspaces = packageJson?.workspaces;
+  if (Array.isArray(workspaces)) return workspaces;
+  if (workspaces && Array.isArray(workspaces.packages)) return workspaces.packages;
+  return [];
+}
+
+function commandPackageFilters(options: FrameworkDetectionOptions = {}) {
+  const commands = detectionCommandSignature(options);
+  const filters: string[] = [];
+  const pattern = /--filter(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(commands))) {
+    const value = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+    if (value && !value.includes("*")) filters.push(value);
+  }
+  return [...new Set(filters)];
+}
+
+function candidatePackagePaths(rootDir: null | string, rootPackageJson: PackageJson | null, options: FrameworkDetectionOptions = {}) {
+  const paths = new Map<string, number>();
+  const addPath = (path: string, priority: number) => {
+    const normalizedPath = path.trim().replace(/^\/+|\/+$/g, "");
+    if (!normalizedPath || normalizedPath.includes("..")) return;
+    const existing = paths.get(normalizedPath);
+    if (existing === undefined || priority < existing) paths.set(normalizedPath, priority);
+  };
+
+  const filters = commandPackageFilters(options);
+  const filterNames = filters.map(packageNameLeaf).filter(Boolean);
+  const serviceName = options.serviceName ? packageNameLeaf(options.serviceName.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")) : "";
+
+  for (const filter of filters) {
+    const normalizedFilter = filter.replace(/^\.\/+/, "").replace(/\/+$/g, "");
+    const filterName = packageNameLeaf(filter);
+    if (normalizedFilter.includes("/")) addPath(`${normalizedFilter}/package.json`, 0);
+    if (filterName) {
+      addPath(`apps/${filterName}/package.json`, 0);
+      addPath(`packages/${filterName}/package.json`, 0);
+      addPath(`services/${filterName}/package.json`, 0);
+    }
   }
 
-  return packageJsons;
+  if (serviceName) {
+    addPath(`apps/${serviceName}/package.json`, 1);
+    addPath(`packages/${serviceName}/package.json`, 1);
+    addPath(`services/${serviceName}/package.json`, 1);
+  }
+
+  for (const entry of normalizedWorkspaceEntries(rootPackageJson)) {
+    const workspace = entry.trim().replace(/^\.\/+/, "").replace(/\/+$/g, "");
+    if (!workspace || workspace.includes("..")) continue;
+    if (workspace.includes("*")) {
+      for (const name of filterNames) {
+        addPath(`${workspace.replace("*", name)}/package.json`, 0);
+      }
+      if (serviceName) addPath(`${workspace.replace("*", serviceName)}/package.json`, 1);
+      continue;
+    }
+    addPath(`${workspace}/package.json`, filters.length > 0 ? 2 : 3);
+  }
+
+  for (const path of packageJsonPaths(rootDir)) {
+    addPath(path, path === "package.json" ? 5 : 4);
+  }
+
+  return [...paths.entries()].sort((left, right) => left[1] - right[1]).map(([path]) => path);
+}
+
+function packageMatchesFilters(read: PackageJsonRead, filters: string[]) {
+  if (filters.length === 0) return false;
+  const packageName = read.packageJson.name ?? "";
+  const packageLeaf = packageNameLeaf(packageName);
+  const dirLeaf = packageNameLeaf(packageJsonDir(read.path));
+  return filters.some((filter) => {
+    const filterLeaf = packageNameLeaf(filter);
+    return packageName === filter || packageLeaf === filterLeaf || dirLeaf === filterLeaf;
+  });
+}
+
+async function readPackageJsonAt(repoFullName: string, branch: string, path: string): Promise<PackageJsonRead | null> {
+  const content = await readRepoFile(repoFullName, branch, path);
+  const parsed = parsePackageJson(content);
+  return parsed ? { path, packageJson: parsed } : null;
+}
+
+async function readPackageJsons(repoFullName: string, branch: string, rootDir: null | string, options: FrameworkDetectionOptions = {}) {
+  const rootPackage = await readPackageJsonAt(repoFullName, branch, "package.json");
+  const filters = commandPackageFilters(options);
+  const reads: PackageJsonRead[] = [];
+  const seen = new Set<string>();
+
+  for (const path of candidatePackagePaths(rootDir, rootPackage?.packageJson ?? null, options)) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const read = path === "package.json" && rootPackage ? rootPackage : await readPackageJsonAt(repoFullName, branch, path);
+    if (read) reads.push(read);
+  }
+
+  const matchingReads = reads.filter((read) => packageMatchesFilters(read, filters));
+  const otherReads = reads.filter((read) => !matchingReads.includes(read));
+  return [...matchingReads, ...otherReads].map((read) => read.packageJson);
 }
 
 function dependencySet(packageJson: PackageJson) {
@@ -143,58 +180,40 @@ function dependencySet(packageJson: PackageJson) {
   ]);
 }
 
-export async function detectFramework(repoFullName: null | string, branch: string, rootDir: null | string) {
+function candidateMatchesDeps(candidate: FrameworkIconCatalogEntry, deps: Set<string>) {
+  if (candidate.dependencies?.some((dependency) => deps.has(dependency))) return true;
+  return candidate.dependencyPrefixes?.some((prefix) => [...deps].some((dependency) => dependency.startsWith(prefix))) ?? false;
+}
+
+async function frameworkMetaFromCatalog(candidate: FrameworkIconCatalogEntry): Promise<FrameworkMeta> {
+  const icon = await cachedFrameworkIconMeta(candidate);
+  return {
+    slug: candidate.slug,
+    name: candidate.name,
+    logoUrl: icon.logoUrl,
+    website: icon.website ?? candidate.website ?? null
+  };
+}
+
+async function databaseFrameworkMeta(dbType: string) {
+  const entry = DATABASE_ICON_CATALOG.find((candidate) => candidate.slug === dbType);
+  if (!entry) return null;
+  return frameworkMetaFromCatalog(entry);
+}
+
+export async function detectFramework(repoFullName: null | string, branch: string, rootDir: null | string, options: FrameworkDetectionOptions = {}) {
   if (!repoFullName) return null;
 
   if (repoFullName.startsWith("database:")) {
     const dbType = repoFullName.split(":")[1];
-    if (dbType === "postgres") {
-      return {
-        slug: "postgres",
-        name: "PostgreSQL",
-        logoUrl: "https://svgl.app/library/postgresql.svg",
-        website: "https://www.postgresql.org/"
-      };
-    }
-    if (dbType === "mysql") {
-      return {
-        slug: "mysql",
-        name: "MySQL",
-        logoUrl: "https://svgl.app/library/mysql-icon-dark.svg",
-        website: "https://www.mysql.com/"
-      };
-    }
-    if (dbType === "redis") {
-      return {
-        slug: "redis",
-        name: "Redis",
-        logoUrl: "https://svgl.app/library/redis.svg",
-        website: "https://redis.io/"
-      };
-    }
-    if (dbType === "mongodb") {
-      return {
-        slug: "mongodb",
-        name: "MongoDB",
-        logoUrl: "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/mongodb/mongodb-original.svg",
-        website: "https://www.mongodb.com/"
-      };
-    }
-    if (dbType === "clickhouse") {
-      return {
-        slug: "clickhouse",
-        name: "ClickHouse",
-        logoUrl: "https://cdn.simpleicons.org/clickhouse",
-        website: "https://clickhouse.com/"
-      };
-    }
+    return databaseFrameworkMeta(dbType);
   }
 
-  const key = cacheKey(repoFullName, branch, rootDir);
+  const key = cacheKey(repoFullName, branch, rootDir, options);
   const cached = frameworkCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const packageJsons = await readPackageJsons(repoFullName, branch, rootDir);
+  const packageJsons = await readPackageJsons(repoFullName, branch, rootDir, options);
   if (packageJsons.length === 0) {
     frameworkCache.set(key, { value: null, expiresAt: Date.now() + CACHE_TTL_MS });
     return null;
@@ -203,14 +222,14 @@ export async function detectFramework(repoFullName: null | string, branch: strin
   const match =
     packageJsons
       .map((packageJson) => dependencySet(packageJson))
-      .map((deps) => DETECTION_CANDIDATES.find((candidate) => candidate.match(deps)) ?? null)
+      .map((deps) => FRAMEWORK_ICON_CATALOG.find((candidate) => candidateMatchesDeps(candidate, deps)) ?? null)
       .find(Boolean) ?? null;
   if (!match) {
     frameworkCache.set(key, { value: null, expiresAt: Date.now() + CACHE_TTL_MS });
     return null;
   }
 
-  const framework = await resolveSvglLogo(match);
+  const framework = await frameworkMetaFromCatalog(match);
   frameworkCache.set(key, { value: framework, expiresAt: Date.now() + CACHE_TTL_MS });
   return framework;
 }
