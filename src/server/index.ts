@@ -16,6 +16,7 @@ import { Readable } from "node:stream";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
@@ -653,7 +654,8 @@ function syncDatabaseUrlEnvVar(serviceId: string) {
         dbType,
         envMap,
         host: service.databasePublicHostname,
-        port: service.hostPort
+        port: service.hostPort,
+        sslMode: isPostgresFamilyDatabase(dbType) ? "require" : undefined
       }).value
     : "";
   const publicKey = publicDatabaseUrlKey(dbType);
@@ -1740,8 +1742,8 @@ app.get("/api/services/:serviceId/database/tls", async (c) => {
   if (!service || !isDatabaseService(service)) {
     return jsonError("Database service not found", 404);
   }
-  if (databaseTypeForService(service) !== "postgres") {
-    return jsonError("Postgres TLS setup is only available for Postgres services.", 400);
+  if (!isPostgresFamilyDatabase(databaseTypeForService(service))) {
+    return jsonError("Postgres TLS setup is only available for Postgres-compatible services.", 400);
   }
 
   try {
@@ -1759,8 +1761,8 @@ app.get("/api/services/:serviceId/database/tls/ca", async (c) => {
   if (!service || !isDatabaseService(service)) {
     return jsonError("Database service not found", 404);
   }
-  if (databaseTypeForService(service) !== "postgres") {
-    return jsonError("Postgres TLS setup is only available for Postgres services.", 400);
+  if (!isPostgresFamilyDatabase(databaseTypeForService(service))) {
+    return jsonError("Postgres TLS setup is only available for Postgres-compatible services.", 400);
   }
 
   try {
