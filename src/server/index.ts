@@ -22,6 +22,7 @@ import { detectFramework } from "./frameworks.js";
 import { envExampleVariableSuggestions } from "./env-example-suggestions.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
 import { getRailwayProjects, getRailwayProjectDetails, importRailwayProject } from "./railway-importer.js";
+import { startRailwayImportAutomation } from "./railway-import-automation.js";
 import { githubConnectionStatus, listConnectedRepos, listRepoBranches, listRepoDirectories, repoUrlFromFullName } from "./github-connect.js";
 import { branchFromGitRef, verifyGitHubSignature } from "./github.js";
 import { subscribeToDeploymentLogs } from "./logBus.js";
@@ -87,6 +88,7 @@ import {
 } from "./database-console.js";
 import { createMigrationBundle, importMigrationBundle } from "./migration-bundle.js";
 import { importPostgresDataFromRailway, importPostgresDataFromUrl } from "./postgres-data-import.js";
+import { listDatabaseDataImports } from "./database-data-imports.js";
 import { listServiceImportSources } from "./service-import-sources.js";
 import { checkPostgresTlsActive, ensurePostgresTlsAssets, getPostgresTlsInfo } from "./postgres-tls.js";
 
@@ -1770,6 +1772,14 @@ app.get("/api/services/:serviceId/import-sources", (c) => {
   return c.json({ sources: listServiceImportSources(service.id) });
 });
 
+app.get("/api/services/:serviceId/database/imports", (c) => {
+  try {
+    return c.json({ imports: listDatabaseDataImports(c.req.param("serviceId")) });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not load database imports", 400);
+  }
+});
+
 app.post("/api/services/:serviceId/database/import/postgres-url", async (c) => {
   const body = postgresUrlImportSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!body.success) {
@@ -2218,7 +2228,23 @@ app.post("/api/integrations/railway/import", async (c) => {
       return jsonError("API Token and Project ID are required");
     }
     const result = await importRailwayProject(token, projectId, config);
-    return c.json({ ok: true, projectSlug: result.projectSlug });
+    const autoDeploy = config.autoDeploy !== false;
+    const importDatabaseData = Boolean(config.importDatabaseData) && autoDeploy && config.importDatabases !== false;
+    startRailwayImportAutomation({
+      railwayToken: token,
+      autoDeploy,
+      importDatabaseData,
+      databaseServiceIds: result.databaseServiceIds,
+      appServiceIds: result.appServiceIds
+    });
+
+    return c.json({
+      ok: true,
+      projectSlug: result.projectSlug,
+      importedCustomDomainCount: result.importedCustomDomainCount,
+      linkedDatabaseVariables: result.linkedDatabaseVariables,
+      syncedDatabaseVariables: result.syncedDatabaseVariables
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Failed to import Railway project";
     return jsonError(msg);
