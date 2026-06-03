@@ -111,12 +111,17 @@ export type DatabaseRowFilter = {
   value: string;
 };
 
+export type DatabaseRuntimeState = "ready" | "deploying" | "idle" | "failed" | "unavailable";
+
 export type DatabaseTablesResponse = {
   engine: string;
   supported: boolean;
   editable: boolean;
   tables: DatabaseTable[];
   message?: string;
+  runtimeState?: DatabaseRuntimeState;
+  serviceStatus?: string;
+  deploymentStatus?: string | null;
 };
 
 export type DatabaseRowsResponse = {
