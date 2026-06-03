@@ -19,6 +19,7 @@ import { config } from "./config.js";
 import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
+import { frameworkIconAsset, prewarmFrameworkIconCache } from "./framework-icons.js";
 import { envExampleVariableSuggestions } from "./env-example-suggestions.js";
 import { resolveServiceEnv } from "./variable-resolver.js";
 import { getRailwayProjects, getRailwayProjectDetails, importRailwayProject } from "./railway-importer.js";
@@ -485,7 +486,12 @@ async function publicService(service: Service) {
   const preferredDomainPayload = preferredDomain
     ? { hostname: preferredDomain.hostname, status: preferredDomain.status }
     : null;
-  const framework = await detectFramework(service.repoFullName, service.branch, service.rootDir);
+  const framework = await detectFramework(service.repoFullName, service.branch, service.rootDir, {
+    buildCommand: service.buildCommand,
+    installCommand: service.installCommand,
+    serviceName: service.name,
+    startCommand: service.startCommand
+  });
 
   return {
     id: service.id,
@@ -994,6 +1000,20 @@ app.post("/api/auth/login", async (c) => {
 app.post("/api/auth/logout", (c) => {
   clearSession(c);
   return c.json({ ok: true });
+});
+
+app.get("/api/assets/framework-icons/:file", async (c) => {
+  const asset = await frameworkIconAsset(c.req.param("file"));
+  if (!asset) {
+    return new Response("Framework icon not found", { status: 404 });
+  }
+
+  return new Response(asset.body, {
+    headers: {
+      "Cache-Control": "public, max-age=604800, stale-while-revalidate=86400",
+      "Content-Type": asset.contentType
+    }
+  });
 });
 
 app.use("/api/*", requireAuth);
@@ -2268,6 +2288,9 @@ void writeAndReloadCaddy().catch((error) => {
 });
 startDatabaseBackupScheduler();
 startDeployWorker();
+void prewarmFrameworkIconCache().catch((error) => {
+  console.error("Failed to prewarm framework icon cache:", error);
+});
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   console.log(`Aeroplane control plane listening on http://${info.address}:${info.port}`);
