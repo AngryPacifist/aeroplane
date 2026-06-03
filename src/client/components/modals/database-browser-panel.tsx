@@ -10,6 +10,10 @@ import { MongoDocumentList } from "./mongo-document-list";
 import { MongoDocumentModal } from "./mongo-document-modal";
 import { DatabaseImportStatusBanner } from "./database-import-status-banner";
 
+function isPostgresFamilyDatabase(engine: string) {
+  return engine === "postgres" || engine === "timescale";
+}
+
 function rowValue(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value);
@@ -71,7 +75,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   const nouns = browserNouns(rowsResult?.engine ?? engine);
   const isRedis = engine === "redis";
   const isMongo = engine === "mongodb" || engine === "mongo";
-  const canImportData = engine === "postgres";
+  const canImportData = isPostgresFamilyDatabase(engine);
   const canAddDocument = isRedis || isMongo;
   const latestDataImport = dataImports[0] ?? null;
   const activeDataImport = dataImports.find((dataImport) => (
@@ -97,7 +101,7 @@ export function DatabaseBrowserPanel({ serviceId }: { serviceId: string }) {
   function preferredSchema(nextTables: DatabaseTable[], nextEngine: string) {
     const schemas = Array.from(new Set(nextTables.map((table) => table.schema))).filter(Boolean);
     if (schemas.includes(selectedSchema)) return selectedSchema;
-    if (["postgres", "mysql", "clickhouse"].includes(nextEngine) && schemas.includes("public")) return "public";
+    if ((isPostgresFamilyDatabase(nextEngine) || nextEngine === "mysql" || nextEngine === "clickhouse") && schemas.includes("public")) return "public";
     return schemas[0] ?? "";
   }
 
