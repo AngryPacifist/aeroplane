@@ -47,6 +47,7 @@ import { ServiceVariablesPanel } from "./service-variables-panel";
 import { formatBuildDuration } from "./service-format";
 import { RuntimeLogsPanel } from "./service-log-panels";
 import { ServiceOverviewPanel } from "./service-overview-panel";
+import { ServicePageSkeleton } from "./service-page-skeleton";
 import type { ServiceTab } from "./service-tabs";
 
 function textOrNull(value: string) {
@@ -116,11 +117,13 @@ export function ServicePageShell({
   const [settingsExpandedDirectories, setSettingsExpandedDirectories] = useState<Set<string>>(new Set());
   const [settingsDirectoryError, setSettingsDirectoryError] = useState("");
   const [settingsDirectoryLoadingPaths, setSettingsDirectoryLoadingPaths] = useState<Set<string>>(new Set());
+  const [overviewLoading, setOverviewLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadOverview = useCallback(async () => {
+    setOverviewLoading(true);
     try {
       const [result, suggs] = await Promise.all([
         api.serviceOverview(serviceId),
@@ -145,10 +148,12 @@ export function ServicePageShell({
           databasePublicHostname: result.service.databasePublicHostname ?? ""
         });
         setError("");
+        setOverviewLoading(false);
       });
     } catch (issue) {
       startTransition(() => {
         setError(issue instanceof Error ? issue.message : "Could not load service");
+        setOverviewLoading(false);
       });
     }
   }, [serviceId]);
@@ -450,6 +455,8 @@ export function ServicePageShell({
       onTabChange("deployments");
     }
   }, [hasSqlConsole, isDatabase, onTabChange, selectedTab, service]);
+
+  if (!overview && overviewLoading && !error) return <ServicePageSkeleton />;
 
   return (
     <>
