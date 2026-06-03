@@ -72,6 +72,16 @@ async function resolveSvglIconMeta(entry: FrameworkIconCatalogEntry): Promise<Ca
   const cached = svglMetaCache.get(entry.slug);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
+  if (entry.sourceUrl) {
+    const value = {
+      logoUrl: localIconUrl(entry.slug),
+      sourceUrl: entry.sourceUrl,
+      website: entry.website ?? null
+    };
+    svglMetaCache.set(entry.slug, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+    return value;
+  }
+
   if (entry.sourcePath) {
     const value = {
       logoUrl: localIconUrl(entry.slug),
