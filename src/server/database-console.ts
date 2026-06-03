@@ -15,8 +15,16 @@ import {
 } from "./database-viewer-shared.js";
 import { db } from "./db.js";
 import { envVars } from "./schema.js";
+import {
+  DatabaseRuntimeUnavailableError,
+  databaseRuntimeErrorForService,
+  databaseRuntimeNoticeForError,
+  databaseRuntimeNoticeForService,
+  type DatabaseRuntimeNotice
+} from "./database-runtime-status.js";
 
 export type { DatabaseRowFilter } from "./database-viewer-shared.js";
+export { DatabaseRuntimeUnavailableError };
 
 function envMapForService(serviceId: string) {
   const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
@@ -260,6 +268,19 @@ function unsupportedResponse(ctx: DatabaseContext) {
   };
 }
 
+function runtimeNoticeResponse(ctx: DatabaseContext, runtimeNotice: DatabaseRuntimeNotice) {
+  return {
+    engine: ctx.dbType,
+    supported: true,
+    editable: false,
+    tables: [] as DatabaseTable[],
+    message: runtimeNotice.message,
+    runtimeState: runtimeNotice.runtimeState,
+    serviceStatus: runtimeNotice.serviceStatus,
+    deploymentStatus: runtimeNotice.deploymentStatus
+  };
+}
+
 async function withTableRowCounts(tables: DatabaseTable[], countRows: (tableId: string) => Promise<number>) {
   return Promise.all(tables.map(async (table) => {
     try {
@@ -272,6 +293,19 @@ async function withTableRowCounts(tables: DatabaseTable[], countRows: (tableId: 
 
 export async function getDatabaseTables(serviceId: string, logicalDatabase = 0) {
   const ctx = databaseContext(serviceId);
+  const runtimeNotice = databaseRuntimeNoticeForService(ctx.service);
+  if (runtimeNotice) return runtimeNoticeResponse(ctx, runtimeNotice);
+
+  try {
+    return await getDatabaseTablesForContext(ctx, logicalDatabase);
+  } catch (error) {
+    const errorNotice = databaseRuntimeNoticeForError(ctx.service, error);
+    if (errorNotice) return runtimeNoticeResponse(ctx, errorNotice);
+    throw error;
+  }
+}
+
+async function getDatabaseTablesForContext(ctx: DatabaseContext, logicalDatabase = 0) {
   if (ctx.dbType === "redis") return getRedisTables(ctx, logicalDatabase);
   if (isMongoDatabase(ctx.dbType)) return getMongoTables(ctx);
   if (!isRelationalDatabase(ctx.dbType)) return unsupportedResponse(ctx);
@@ -338,6 +372,17 @@ export async function getDatabaseTables(serviceId: string, logicalDatabase = 0) 
 
 export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number, filters: DatabaseRowFilter[] = []) {
   const ctx = databaseContext(serviceId);
+  const runtimeNotice = databaseRuntimeNoticeForService(ctx.service);
+  if (runtimeNotice) throw new DatabaseRuntimeUnavailableError(runtimeNotice);
+
+  try {
+    return await getDatabaseRowsForContext(ctx, table, limit, offset, filters);
+  } catch (error) {
+    throw databaseRuntimeErrorForService(ctx.service, error);
+  }
+}
+
+async function getDatabaseRowsForContext(ctx: DatabaseContext, table: string, limit: number, offset: number, filters: DatabaseRowFilter[] = []) {
   const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
   const safeOffset = Math.max(offset || 0, 0);
 
