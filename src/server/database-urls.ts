@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import type { Service } from "./schema.js";
 
 type DatabaseServiceShape = Pick<Service, "repoUrl" | "repoFullName">;
@@ -8,6 +9,7 @@ type DatabaseUrlOptions = {
   envMap: Map<string, string>;
   host: string;
   port: number;
+  sslMode?: "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full";
 };
 
 export function isDatabaseService(service: DatabaseServiceShape) {
@@ -20,6 +22,7 @@ export function databaseTypeForService(service: DatabaseServiceShape) {
 
 export function normalizeDatabaseType(value: string) {
   const lower = value.toLowerCase();
+  if (lower.includes("timescale")) return "timescale";
   if (lower.includes("mysql") || lower.includes("mariadb")) return "mysql";
   if (lower.includes("redis")) return "redis";
   if (lower.includes("mongo")) return "mongodb";
@@ -81,14 +84,17 @@ export function generatedDatabaseEnvVars(dbType: string): Record<string, string>
     };
   }
 
-  return {
+  const postgresEnv = {
     POSTGRES_DB: "aeroplane",
     POSTGRES_USER: "postgres",
     POSTGRES_PASSWORD: generatedPassword()
   };
+  if (dbType === "timescale") return { ...postgresEnv, TIMESCALEDB_TELEMETRY: "off" };
+  return postgresEnv;
 }
 
 export function publicDatabaseUrlKey(dbType: string) {
+  if (isPostgresFamilyDatabase(dbType)) return "POSTGRES_PUBLIC_URL";
   if (dbType === "mysql") return "MYSQL_PUBLIC_URL";
   if (dbType === "redis") return "REDIS_PUBLIC_URL";
   if (dbType === "mongodb") return "MONGODB_PUBLIC_URL";
@@ -105,7 +111,7 @@ export const publicDatabaseUrlKeys = [
   "CLICKHOUSE_PUBLIC_URL"
 ];
 
-export function buildDatabaseConnectionUrl({ dbType, envMap, host, port }: DatabaseUrlOptions) {
+export function buildDatabaseConnectionUrl({ dbType, envMap, host, port, sslMode }: DatabaseUrlOptions) {
   if (dbType === "mysql") {
     const user = envMap.get("MYSQL_USER") || "mysql";
     const password = envMap.get("MYSQL_PASSWORD") || "";
@@ -146,8 +152,9 @@ export function buildDatabaseConnectionUrl({ dbType, envMap, host, port }: Datab
   const user = envMap.get("POSTGRES_USER") || "postgres";
   const password = envMap.get("POSTGRES_PASSWORD") || "";
   const dbName = envMap.get("POSTGRES_DB") || "aeroplane";
+  const sslQuery = sslMode ? `?sslmode=${sslMode}` : "";
   return {
     key: "DATABASE_URL",
-    value: `postgresql://${user}:${password}@${host}:${port}/${dbName}`
+    value: `postgresql://${user}:${password}@${host}:${port}/${dbName}${sslQuery}`
   };
 }
