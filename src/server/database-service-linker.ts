@@ -54,6 +54,29 @@ function databaseConnectionSuggestionKey(dbType: string, primaryKey: string) {
   return primaryKey;
 }
 
+function normalizeKey(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+}
+
+function keyDatabaseType(key: string) {
+  const normalized = normalizeKey(key);
+  if (normalized.includes("REDIS")) return "redis";
+  if (normalized.includes("MONGO")) return "mongodb";
+  if (normalized.includes("MYSQL") || normalized.includes("MARIA")) return "mysql";
+  if (normalized.includes("CLICKHOUSE")) return "clickhouse";
+  if (normalized.includes("POSTGRES") || normalized.includes("PG_")) return "postgres";
+  if (normalized === "DATABASE_URL" || normalized.endsWith("_DATABASE_URL")) return "relational";
+  return null;
+}
+
+function keyMatchesDatabaseService(key: string, databaseService: { name: string; slug: string }) {
+  const normalizedKey = normalizeKey(key);
+  const names = [databaseService.name, databaseService.slug]
+    .flatMap((value) => normalizeKey(value).split("_"))
+    .filter((part) => part.length >= 3);
+  return names.some((part) => normalizedKey.includes(part));
+}
+
 function databaseConnectionEnvSuggestionsForProjectServices(projectId: string, excludeServiceId?: string) {
   const projectServices = db.select().from(services).where(eq(services.projectId, projectId)).all();
   const databaseServices = projectServices.filter((projectService) => projectService.id !== excludeServiceId && isDatabaseService(projectService));
@@ -127,4 +150,61 @@ export function syncProjectDatabaseConnectionEnv(projectId: string) {
   }
 
   return { linked: 0, synced };
+}
+
+export function linkProjectAppDatabaseConnectionEnv(projectId: string) {
+  const projectServices = db.select().from(services).where(eq(services.projectId, projectId)).all();
+  const databaseServices = projectServices.filter((service) => isDatabaseService(service));
+  const appServices = projectServices.filter((service) => !isDatabaseService(service));
+  if (databaseServices.length === 0 || appServices.length === 0) {
+    return { linked: 0 };
+  }
+
+  const serviceIds = projectServices.map((service) => service.id);
+  const envsByServiceId = mapEnvRows(serviceIds);
+  const databaseConnections = databaseServices.map((databaseService) => {
+    const dbType = databaseTypeForService(databaseService);
+    const envMap = envsByServiceId.get(databaseService.id) ?? new Map<string, string>();
+    const connectionUrl = buildDatabaseConnectionUrl({
+      dbType,
+      envMap,
+      host: databaseService.slug,
+      port: databaseService.internalPort
+    });
+
+    return {
+      service: databaseService,
+      dbType,
+      key: databaseConnectionSuggestionKey(dbType, connectionUrl.key),
+      value: connectionUrl.value
+    };
+  });
+
+  const timestamp = nowIso();
+  let linked = 0;
+
+  for (const appService of appServices) {
+    const envMap = envsByServiceId.get(appService.id) ?? new Map<string, string>();
+    for (const [key, currentValue] of envMap) {
+      const requestedType = keyDatabaseType(key);
+      if (!requestedType) continue;
+
+      const candidates = databaseConnections.filter((connection) => {
+        if (requestedType === "relational") {
+          return connection.dbType === "postgres" || connection.dbType === "mysql";
+        }
+        return connection.dbType === requestedType;
+      });
+      if (candidates.length === 0) continue;
+
+      const connection = candidates.find((candidate) => keyMatchesDatabaseService(key, candidate.service)) ?? candidates[0];
+      if (!connection || currentValue === connection.value) continue;
+
+      upsertEnvVar(appService.id, key, connection.value, timestamp);
+      envMap.set(key, connection.value);
+      linked += 1;
+    }
+  }
+
+  return { linked };
 }
