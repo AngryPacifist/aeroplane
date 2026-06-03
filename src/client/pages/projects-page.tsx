@@ -1,11 +1,18 @@
 import { useNavigate } from "@tanstack/react-router";
 import { AddSquareIcon, FolderCodeIcon } from "@hugeicons/core-free-icons";
 import { startTransition, useCallback, useEffect, useState } from "react";
-import { api, type GitHubStatus, type ProjectCard, type R2SettingsStatus, type ToolCheck } from "../api";
+import {
+  api,
+  type GitHubStatus,
+  type ProjectCard,
+  type R2SettingsStatus,
+  type ToolCheck,
+} from "../api";
 import { BrandMark } from "../components/ui/brand-mark";
 import { AppIcon } from "../components/ui/primitives";
 import { GitHubInstallModal } from "../features/github/github-install-modal";
 import { CreateProjectModal } from "../features/projects/create-project-modal";
+import { ProjectsGridSkeleton } from "../features/projects/projects-grid-skeleton";
 import { ServiceCluster } from "../features/projects/service-cluster";
 import { SystemHealthPill } from "../features/projects/system-health-pill";
 import { SetupTodoList } from "../features/projects/setup-todo-list";
@@ -21,7 +28,9 @@ export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectCard[]>([]);
   const [tools, setTools] = useState<ToolCheck[]>([]);
   const [githubStatus, setGitHubStatus] = useState<null | GitHubStatus>(null);
-  const [domainSettings, setDomainSettings] = useState<null | Awaited<ReturnType<typeof api.systemSettings>>>(null);
+  const [domainSettings, setDomainSettings] = useState<null | Awaited<
+    ReturnType<typeof api.systemSettings>
+  >>(null);
   const [r2Status, setR2Status] = useState<null | R2SettingsStatus>(null);
   const [setupLoading, setSetupLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -32,26 +41,39 @@ export function ProjectsPage() {
   const loadProjects = useCallback(async () => {
     setSetupLoading(true);
     try {
-      const [projectData, systemData, githubData, domainData, r2Data] = await Promise.all([
-        api.projects(),
-        api.system(),
-        api.githubStatus().catch(() => null),
-        api.systemSettings().catch(() => null),
-        api.r2Settings().then((result) => result.r2).catch(() => null)
-      ]);
+      const [projectData, systemData, githubData, domainData, r2Data] =
+        await Promise.all([
+          api.projects(),
+          api.system(),
+          api.githubStatus().catch(() => null),
+          api.systemSettings().catch(() => null),
+          api
+            .r2Settings()
+            .then((result) => result.r2)
+            .catch(() => null),
+        ]);
       startTransition(() => {
         setProjects(projectData.projects);
         setTools(systemData.tools);
         setGitHubStatus(githubData);
         setDomainSettings(domainData);
         setR2Status(r2Data);
-        setGitHubInstallOpen(Boolean(githubData && githubData.mode === "app" && !githubData.installed && githubData.installUrl));
+        setGitHubInstallOpen(
+          Boolean(
+            githubData &&
+            githubData.mode === "app" &&
+            !githubData.installed &&
+            githubData.installUrl,
+          ),
+        );
         setError("");
         setSetupLoading(false);
       });
     } catch (issue) {
       startTransition(() => {
-        setError(issue instanceof Error ? issue.message : "Could not load projects");
+        setError(
+          issue instanceof Error ? issue.message : "Could not load projects",
+        );
         setSetupLoading(false);
       });
     }
@@ -66,14 +88,27 @@ export function ProjectsPage() {
       void loadProjects();
     }
 
-    window.addEventListener("aeroplane-system-settings-closed", reloadAfterSettingsClose);
-    return () => window.removeEventListener("aeroplane-system-settings-closed", reloadAfterSettingsClose);
+    window.addEventListener(
+      "aeroplane-system-settings-closed",
+      reloadAfterSettingsClose,
+    );
+    return () =>
+      window.removeEventListener(
+        "aeroplane-system-settings-closed",
+        reloadAfterSettingsClose,
+      );
   }, [loadProjects]);
 
-  async function createProject(payload: { name: string; description?: string }) {
+  async function createProject(payload: {
+    name: string;
+    description?: string;
+  }) {
     const result = await api.createProject(payload);
     await loadProjects();
-    void navigate({ to: "/$projectSlug", params: { projectSlug: result.project.slug } });
+    void navigate({
+      to: "/$projectSlug",
+      params: { projectSlug: result.project.slug },
+    });
   }
 
   function openSystemSettings(tab: SystemSettingsTab = "root-domain") {
@@ -81,15 +116,18 @@ export function ProjectsPage() {
       to: "/",
       search: (current) => ({
         ...current,
-        settings: tab
-      })
+        settings: tab,
+      }),
     });
   }
 
   return (
     <>
       <main className="relative isolate min-h-dvh overflow-hidden bg-zinc-950 text-zinc-100">
-        <div aria-hidden className="hero-noise pointer-events-none absolute inset-0" />
+        <div
+          aria-hidden
+          className="hero-noise pointer-events-none absolute inset-0"
+        />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_0%_0%,rgba(79,184,178,0.12),transparent),radial-gradient(ellipse_70%_50%_at_100%_100%,rgba(120,113,255,0.08),transparent)]"
@@ -106,8 +144,12 @@ export function ProjectsPage() {
                 <BrandMark />
               </div>
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600">Aeroplane registry</div>
-                <div className="font-hero text-lg tracking-tight text-zinc-100">Projects</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-zinc-600">
+                  Aeroplane registry
+                </div>
+                <div className="font-hero text-lg tracking-tight text-zinc-100">
+                  Projects
+                </div>
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -151,16 +193,22 @@ export function ProjectsPage() {
             onOpenGitHubInstall={() => setGitHubInstallOpen(true)}
           />
 
-          {projects.length === 0 ? (
+          {setupLoading ? (
+            <ProjectsGridSkeleton />
+          ) : projects.length === 0 ? (
             <section className="border border-zinc-800 bg-zinc-950/60 px-6 py-10 sm:px-8">
               <div className="max-w-2xl">
                 <div className="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                   <AppIcon icon={FolderCodeIcon} size={14} />
                   Empty registry
                 </div>
-                <h2 className="mt-6 font-hero text-3xl font-extrabold tracking-tight text-zinc-100">No projects yet</h2>
+                <h2 className="mt-6 font-hero text-3xl font-extrabold tracking-tight text-zinc-100">
+                  No projects yet
+                </h2>
                 <p className="mt-3 max-w-lg font-mono text-sm leading-relaxed text-zinc-500">
-                  Create a project first, then attach services inside it. Each service gets its own deployment timeline, runtime logs, variables, and domains.
+                  Create a project first, then attach services inside it. Each
+                  service gets its own deployment timeline, runtime logs,
+                  variables, and domains.
                 </p>
                 <button
                   type="button"
@@ -179,7 +227,12 @@ export function ProjectsPage() {
                   key={project.id}
                   type="button"
                   className="group relative overflow-hidden border border-zinc-800 bg-zinc-950/68 p-5 text-left transition-colors hover:border-[#4FB8B2]/35 hover:bg-zinc-900/72"
-                  onClick={() => void navigate({ to: "/$projectSlug", params: { projectSlug: project.slug } })}
+                  onClick={() =>
+                    void navigate({
+                      to: "/$projectSlug",
+                      params: { projectSlug: project.slug },
+                    })
+                  }
                 >
                   <div
                     aria-hidden
@@ -193,10 +246,13 @@ export function ProjectsPage() {
                   <div className="relative z-10">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <h2 className="font-sans text-lg font-semibold tracking-tight text-zinc-100">{project.name}</h2>
+                        <h2 className="font-sans text-lg font-semibold tracking-tight text-zinc-100">
+                          {project.name}
+                        </h2>
                       </div>
                       <span className="shrink-0 border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-200">
-                        {project.serviceCount} service{project.serviceCount === 1 ? "" : "s"}
+                        {project.serviceCount} service
+                        {project.serviceCount === 1 ? "" : "s"}
                       </span>
                     </div>
 
@@ -210,9 +266,21 @@ export function ProjectsPage() {
           )}
         </div>
       </main>
-      <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={createProject} />
-      <RailwayImportModal open={railwayImportOpen} onClose={() => setRailwayImportOpen(false)} onSuccess={loadProjects} />
-      <GitHubInstallModal open={githubInstallOpen} status={githubStatus} onClose={() => setGitHubInstallOpen(false)} />
+      <CreateProjectModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreate={createProject}
+      />
+      <RailwayImportModal
+        open={railwayImportOpen}
+        onClose={() => setRailwayImportOpen(false)}
+        onSuccess={loadProjects}
+      />
+      <GitHubInstallModal
+        open={githubInstallOpen}
+        status={githubStatus}
+        onClose={() => setGitHubInstallOpen(false)}
+      />
     </>
   );
 }
