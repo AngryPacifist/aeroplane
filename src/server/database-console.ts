@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { containerNameForService, getServiceById } from "./deploy.js";
+import { isMongoDatabase, isPostgresFamilyDatabase, isRelationalDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { deleteMongoRow, getMongoRows, getMongoTables, insertMongoRow, updateMongoRow } from "./database-mongo-viewer.js";
 import { deleteRedisRow, getRedisRows, getRedisTables, insertRedisRow, updateRedisRow } from "./database-redis-viewer.js";
@@ -16,8 +17,6 @@ import { db } from "./db.js";
 import { envVars } from "./schema.js";
 
 export type { DatabaseRowFilter } from "./database-viewer-shared.js";
-
-const relationalEngines = new Set(["postgres", "mysql", "clickhouse"]);
 
 function envMapForService(serviceId: string) {
   const rows = db.select().from(envVars).where(eq(envVars.serviceId, serviceId)).all();
@@ -274,10 +273,11 @@ async function withTableRowCounts(tables: DatabaseTable[], countRows: (tableId: 
 export async function getDatabaseTables(serviceId: string, logicalDatabase = 0) {
   const ctx = databaseContext(serviceId);
   if (ctx.dbType === "redis") return getRedisTables(ctx, logicalDatabase);
-  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return getMongoTables(ctx);
-  if (!relationalEngines.has(ctx.dbType)) return unsupportedResponse(ctx);
+  if (isMongoDatabase(ctx.dbType)) return getMongoTables(ctx);
+  if (!isRelationalDatabase(ctx.dbType)) return unsupportedResponse(ctx);
 
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
+    const timescaleSchemaFilter = ctx.dbType === "timescale" ? "AND table_schema !~ '^_timescaledb_'" : "";
     const tables = await postgresJson<DatabaseTable[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
       FROM (
@@ -285,6 +285,7 @@ export async function getDatabaseTables(serviceId: string, logicalDatabase = 0) 
         FROM information_schema.tables
         WHERE table_type = 'BASE TABLE'
           AND table_schema NOT IN ('pg_catalog', 'information_schema')
+          ${timescaleSchemaFilter}
         ORDER BY table_schema, table_name
       ) t
     `);
@@ -341,9 +342,9 @@ export async function getDatabaseRows(serviceId: string, table: string, limit: n
   const safeOffset = Math.max(offset || 0, 0);
 
   if (ctx.dbType === "redis") return getRedisRows(ctx, table, safeLimit, safeOffset, filters);
-  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return getMongoRows(ctx, table, safeLimit, safeOffset, filters);
+  if (isMongoDatabase(ctx.dbType)) return getMongoRows(ctx, table, safeLimit, safeOffset, filters);
 
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
     const { schema, name } = splitTableId(table);
     const columns = await postgresJson<DatabaseColumn[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(c)), '[]'::json)
@@ -449,7 +450,7 @@ export async function runDatabaseQuery(serviceId: string, sql: string) {
   if (!trimmed) throw new Error("SQL is required");
 
   const startedAt = Date.now();
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
     if (isPostgresRowQuery(trimmed)) {
       const rows = await postgresJson<RowData[]>(ctx, `
         SELECT COALESCE(json_agg(row_to_json(q)), '[]'::json)
@@ -495,9 +496,9 @@ export async function insertDatabaseRow(serviceId: string, table: string, values
   if (entries.length === 0) throw new Error("At least one column value is required");
 
   if (ctx.dbType === "redis") return insertRedisRow(ctx, table, values);
-  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return insertMongoRow(ctx, table, values);
+  if (isMongoDatabase(ctx.dbType)) return insertMongoRow(ctx, table, values);
 
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
     await runPostgres(
       ctx,
       `INSERT INTO ${postgresTableSql(table)} (${entries.map(([key]) => quotePgIdentifier(key)).join(", ")}) VALUES (${entries.map(([, value]) => sqlLiteral(value)).join(", ")})`
@@ -523,9 +524,9 @@ export async function updateDatabaseRow(serviceId: string, table: string, primar
   if (assignments.length === 0) throw new Error("No changes to save");
   if (where.length === 0) throw new Error("A primary key is required to update rows");
   if (ctx.dbType === "redis") return updateRedisRow(ctx, table, primaryKey, values);
-  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return updateMongoRow(ctx, table, primaryKey, values);
+  if (isMongoDatabase(ctx.dbType)) return updateMongoRow(ctx, table, primaryKey, values);
 
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
     await runPostgres(
       ctx,
       `UPDATE ${postgresTableSql(table)} SET ${assignments.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(", ")} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
@@ -550,9 +551,9 @@ export async function deleteDatabaseRow(serviceId: string, table: string, primar
 
   const where = Object.entries(primaryKey).filter(([key]) => key.trim());
   if (where.length === 0) throw new Error("A primary key is required to delete rows");
-  if (ctx.dbType === "mongodb" || ctx.dbType === "mongo") return deleteMongoRow(ctx, table, primaryKey);
+  if (isMongoDatabase(ctx.dbType)) return deleteMongoRow(ctx, table, primaryKey);
 
-  if (ctx.dbType === "postgres") {
+  if (isPostgresFamilyDatabase(ctx.dbType)) {
     await runPostgres(
       ctx,
       `DELETE FROM ${postgresTableSql(table)} WHERE ${where.map(([key, value]) => `${quotePgIdentifier(key)} = ${sqlLiteral(value)}`).join(" AND ")}`
