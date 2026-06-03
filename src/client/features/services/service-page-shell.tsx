@@ -379,6 +379,13 @@ export function ServicePageShell({
     });
   }
 
+  async function deployService() {
+    await doAction("deploy", async () => {
+      const result = await api.createDeployment(serviceId);
+      startTransition(() => setActiveDeploymentId(result.deployment.id));
+    });
+  }
+
   async function deleteService() {
     if (!overview?.service || !window.confirm(`Delete service "${overview.service.name}"?`)) return;
     setBusy("delete");
@@ -489,7 +496,7 @@ export function ServicePageShell({
                     databaseEngine={databaseEngine}
                     busy={busy}
                     nowMs={nowMs}
-                    onDeploy={() => void doAction("deploy", async () => void api.createDeployment(serviceId))}
+                    onDeploy={() => void deployService()}
                     onTabChange={onTabChange}
                   />
                 ) : null
@@ -505,6 +512,7 @@ export function ServicePageShell({
                   busy={busy}
                   nowMs={nowMs}
                   onSelectDeployment={setActiveDeploymentId}
+                  onDeploy={() => void deployService()}
                   onAbortActiveDeployment={() => void abortActiveDeployment()}
                 />
               ) : null}
