@@ -1,5 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { buildDatabaseConnectionUrl, databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { db, nowIso } from "./db.js";
 import { envVars, services } from "./schema.js";
@@ -64,6 +65,7 @@ function keyDatabaseType(key: string) {
   if (normalized.includes("MONGO")) return "mongodb";
   if (normalized.includes("MYSQL") || normalized.includes("MARIA")) return "mysql";
   if (normalized.includes("CLICKHOUSE")) return "clickhouse";
+  if (normalized.includes("TIMESCALE")) return "timescale";
   if (normalized.includes("POSTGRES") || normalized.includes("PG_")) return "postgres";
   if (normalized === "DATABASE_URL" || normalized.endsWith("_DATABASE_URL")) return "relational";
   return null;
@@ -191,7 +193,10 @@ export function linkProjectAppDatabaseConnectionEnv(projectId: string) {
 
       const candidates = databaseConnections.filter((connection) => {
         if (requestedType === "relational") {
-          return connection.dbType === "postgres" || connection.dbType === "mysql";
+          return isPostgresFamilyDatabase(connection.dbType) || connection.dbType === "mysql";
+        }
+        if (requestedType === "postgres") {
+          return isPostgresFamilyDatabase(connection.dbType);
         }
         return connection.dbType === requestedType;
       });
