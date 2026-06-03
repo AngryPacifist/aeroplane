@@ -1,8 +1,9 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { db, nowIso } from "./db.js";
-import { importPostgresDataFromRailway } from "./postgres-data-import.js";
+import { importPostgresDataFromRailway, preparePostgresDataImportFromRailway } from "./postgres-data-import.js";
 import { getRailwayImportSource } from "./service-import-sources.js";
 import { databaseDataImports, type DatabaseDataImport } from "./schema.js";
 import { getServiceById } from "./deploy.js";
@@ -50,8 +51,8 @@ function assertPostgresDatabaseService(serviceId: string) {
   }
 
   const engine = databaseTypeForService(service);
-  if (engine !== "postgres") {
-    throw new Error("Railway data import is only available for Postgres services.");
+  if (!isPostgresFamilyDatabase(engine)) {
+    throw new Error("Railway data import is only available for Postgres-compatible services.");
   }
 
   return { service, engine };
@@ -136,4 +137,9 @@ export function startRailwayPostgresDataImportJob(serviceId: string, apiToken: s
   db.insert(databaseDataImports).values(row).run();
   void runRailwayPostgresImportJob(importId, serviceId, apiToken);
   return publicDatabaseDataImport(row);
+}
+
+export async function prepareRailwayPostgresDataImport(serviceId: string, apiToken: string) {
+  assertPostgresDatabaseService(serviceId);
+  return preparePostgresDataImportFromRailway(serviceId, apiToken);
 }
