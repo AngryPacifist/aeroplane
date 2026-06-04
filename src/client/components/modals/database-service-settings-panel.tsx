@@ -81,14 +81,14 @@ export function DatabaseServiceSettingsPanel({ settings, hostPort, supportsLogic
           <div className="border border-zinc-800 bg-zinc-950/35 p-4">
             <Checkbox
               checked={settings.postgresLogicalReplicationEnabled}
-              label="Enable logical replication"
+              label="Logical replication enabled"
               onChange={(checked) => onChange({ ...settings, postgresLogicalReplicationEnabled: checked })}
               className="items-start"
             >
               <span className="grid gap-1">
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200">Enable logical replication</span>
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200">Logical replication enabled</span>
                 <span className="text-sm leading-6 text-zinc-500">
-                  Sets <code className="font-mono text-zinc-300">wal_level=logical</code>, <code className="font-mono text-zinc-300">max_replication_slots=10</code>, and <code className="font-mono text-zinc-300">max_wal_senders=10</code> on the next deploy.
+                  Postgres deploys with <code className="font-mono text-zinc-300">wal_level=logical</code>, <code className="font-mono text-zinc-300">max_replication_slots=10</code>, and <code className="font-mono text-zinc-300">max_wal_senders=10</code>.
                 </span>
               </span>
             </Checkbox>
