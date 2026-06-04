@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS projects (
   build_command TEXT,
   start_command TEXT,
   static_output TEXT,
+  runtime_mode TEXT NOT NULL DEFAULT 'web',
   internal_port INTEGER NOT NULL,
   host_port INTEGER NOT NULL UNIQUE,
   active_port INTEGER,
@@ -195,6 +196,10 @@ if (!hasColumn("projects", "root_dir")) {
 
 if (!hasColumn("projects", "active_port")) {
   sqlite.exec("ALTER TABLE projects ADD COLUMN active_port INTEGER");
+}
+
+if (!hasColumn("projects", "runtime_mode")) {
+  sqlite.exec("ALTER TABLE projects ADD COLUMN runtime_mode TEXT NOT NULL DEFAULT 'web'");
 }
 
 if (!hasColumn("projects", "database_public_enabled")) {
