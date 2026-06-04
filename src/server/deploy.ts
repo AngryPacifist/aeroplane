@@ -332,12 +332,69 @@ async function getContainerState(containerName: string) {
   };
 }
 
+function deploymentLogCommand(command: string, args: string[], secrets: string[]) {
+  return `$ ${[command, ...args].map((part) => redactLine(part, secrets)).join(" ")}`;
+}
+
+function appendCommandOutputLogs(deploymentId: string, output: string, stream: "stdout" | "stderr", secrets: string[]) {
+  for (const line of output.split(/\r?\n/)) {
+    if (line.trim().length > 0) {
+      appendDeploymentLog(deploymentId, line, stream, secrets);
+    }
+  }
+}
+
 async function appendContainerLogs(containerName: string, deploymentId: string, secrets: string[]) {
   appendDeploymentLog(deploymentId, `Container startup logs from ${containerName}:`, "stderr", secrets);
-  await runCommand("docker", ["logs", "--tail", "120", containerName], deploymentId, { redact: secrets }).catch((error) => {
-    const message = error instanceof Error ? error.message : "Could not read container logs";
-    appendDeploymentLog(deploymentId, `Could not read container logs: ${message}`, "stderr", secrets);
-  });
+  const args = ["logs", "--tail", "120", containerName];
+  appendDeploymentLog(deploymentId, deploymentLogCommand("docker", args, secrets));
+  const result = await runBufferedCommand("docker", args);
+  appendCommandOutputLogs(deploymentId, result.stdout, "stdout", secrets);
+  appendCommandOutputLogs(deploymentId, result.stderr, "stderr", secrets);
+  if (result.code !== 0) {
+    appendDeploymentLog(deploymentId, `Could not read container logs: ${(result.stderr || result.stdout || "docker logs failed").trim()}`, "stderr", secrets);
+  }
+  return redactLine([result.stdout, result.stderr].filter(Boolean).join("\n"), secrets);
+}
+
+function detectListeningPorts(logs: string) {
+  const ports = new Set<number>();
+  const patterns = [
+    /\b(?:at|on)\s+(?:https?:\/\/)?(?:0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\])?:([0-9]{2,5})\b/gi,
+    /\b(?:listening|serving|running)[^\n]{0,120}?(?:port\s+|:)([0-9]{2,5})\b/gi,
+    /\bport\s*[=:]\s*([0-9]{2,5})\b/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of logs.matchAll(pattern)) {
+      const port = Number(match[1]);
+      if (Number.isInteger(port) && port > 0 && port <= 65535) {
+        ports.add(port);
+      }
+    }
+  }
+
+  return Array.from(ports);
+}
+
+function appendContainerPortHint(deploymentId: string, logs: string, configuredPort: number, secrets: string[]) {
+  const suggestedPort = detectListeningPorts(logs).find((port) => port !== configuredPort);
+  if (suggestedPort) {
+    appendDeploymentLog(
+      deploymentId,
+      `Hint: the container logs mention port ${suggestedPort}, but this service is configured to route traffic to container port ${configuredPort}. Update the service Container port to ${suggestedPort} and redeploy, or make the container listen on ${configuredPort}.`,
+      "stderr",
+      secrets
+    );
+    return;
+  }
+
+  appendDeploymentLog(
+    deploymentId,
+    `Hint: the container stayed running, but nothing answered on configured container port ${configuredPort}. Check the image's exposed/listening port and update the service Container port if it differs.`,
+    "stderr",
+    secrets
+  );
 }
 
 async function probeContainerStartup(port: number, containerName: string, timeoutMs = 20000) {
@@ -849,7 +906,10 @@ async function runDeployment(deployment: Deployment, service: Service) {
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         appendDeploymentLog(deployment.id, `Startup health check failed: ${errMsg}.`, "stderr");
-        await appendContainerLogs(tempContainerName, deployment.id, secrets);
+        const startupLogs = await appendContainerLogs(tempContainerName, deployment.id, secrets);
+        if (errMsg.includes("timed out")) {
+          appendContainerPortHint(deployment.id, startupLogs, runtimePort, secrets);
+        }
         appendDeploymentLog(deployment.id, "Cleaning up temporary container...", "stderr");
         await runCommand("docker", ["rm", "-f", tempContainerName], deployment.id).catch(() => {});
         throw new Error(`Health check failed: ${errMsg}`);
@@ -1077,7 +1137,10 @@ async function runDeployment(deployment: Deployment, service: Service) {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       appendDeploymentLog(deployment.id, `Startup health check failed: ${errMsg}.`, "stderr");
-      await appendContainerLogs(tempContainerName, deployment.id, secrets);
+      const startupLogs = await appendContainerLogs(tempContainerName, deployment.id, secrets);
+      if (errMsg.includes("timed out")) {
+        appendContainerPortHint(deployment.id, startupLogs, runtimePort, secrets);
+      }
       appendDeploymentLog(deployment.id, "Cleaning up temporary container...", "stderr");
       await runCommand("docker", ["rm", "-f", tempContainerName], deployment.id).catch(() => {});
       throw new Error(`Health check failed: ${errMsg}`);
