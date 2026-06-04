@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
 import {
-  AddSquareIcon,
+  Alert02Icon,
   ArrowLeft01Icon,
   CheckmarkCircle02Icon,
+  CloudServerIcon,
+  GithubIcon,
+  PackageIcon,
   Search01Icon,
   WorkflowSquare07Icon,
   Globe02Icon,
@@ -29,6 +32,51 @@ interface RailwayImportModalProps {
   onSuccess: () => void;
 }
 
+type RailwayServiceKind = "git" | "database" | "docker-image" | "unsupported";
+
+type RailwayServiceSourcePreview = {
+  kind: RailwayServiceKind;
+  sourceLabel: string;
+  unsupportedReason: null | string;
+  dbType: null | string;
+  image: null | string;
+};
+
+type RailwayImportServicePreview = RailwayServiceSourcePreview & {
+  id: string;
+  name: string;
+  sourcesByEnvironment: Record<string, RailwayServiceSourcePreview>;
+};
+
+function servicePreviewForEnvironment(service: RailwayImportServicePreview, environmentId: string) {
+  return service.sourcesByEnvironment[environmentId] ?? service;
+}
+
+function importableServicesForEnvironment(services: RailwayImportServicePreview[], environmentId: string) {
+  return services.filter((service) => servicePreviewForEnvironment(service, environmentId).kind !== "unsupported");
+}
+
+function serviceKindLabel(kind: RailwayServiceKind) {
+  if (kind === "database") return "Database";
+  if (kind === "docker-image") return "Docker Image";
+  if (kind === "git") return "Git Service";
+  return "Unsupported";
+}
+
+function serviceKindIcon(kind: RailwayServiceKind) {
+  if (kind === "database") return CloudServerIcon;
+  if (kind === "docker-image") return PackageIcon;
+  if (kind === "git") return GithubIcon;
+  return Alert02Icon;
+}
+
+function serviceKindClass(kind: RailwayServiceKind) {
+  if (kind === "database") return "border-[#4FB8B2]/30 bg-[#4FB8B2]/5 text-[#4FB8B2]";
+  if (kind === "docker-image") return "border-sky-500/30 bg-sky-500/5 text-sky-300";
+  if (kind === "git") return "border-purple-500/30 bg-purple-500/5 text-purple-400";
+  return "border-amber-500/35 bg-amber-500/10 text-amber-200";
+}
+
 export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportModalProps) {
   const navigate = useNavigate();
   const [step, setStep] = useState<"auth" | "select" | "configure" | "importing" | "success">("auth");
@@ -46,7 +94,7 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
 
   // Configuration step states
   const [projectDetails, setProjectDetails] = useState<{
-    services: Array<{ id: string; name: string }>;
+    services: RailwayImportServicePreview[];
     environments: Array<{ id: string; name: string }>;
   } | null>(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
@@ -99,11 +147,12 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
     try {
       const data = await api.railwayProjectDetails(apiToken.trim(), project.id);
       const details = data.details;
+      const defaultEnvironmentId = details.environments[0]?.id || "";
       setProjectDetails(details);
       
       // Initialize defaults
-      setSelectedServiceIds(details.services.map(s => s.id));
-      setSelectedEnvironmentId(details.environments[0]?.id || "");
+      setSelectedServiceIds(importableServicesForEnvironment(details.services, defaultEnvironmentId).map((service) => service.id));
+      setSelectedEnvironmentId(defaultEnvironmentId);
       setExcludeRailwayVars(true);
       setImportDatabases(true);
       setAutoDeploy(true);
@@ -328,7 +377,15 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
               <FieldLabel>Target Environment</FieldLabel>
               <Dropdown
                 value={selectedEnvironmentId}
-                onChange={setSelectedEnvironmentId}
+                onChange={(environmentId) => {
+                  setSelectedEnvironmentId(environmentId);
+                  setSelectedServiceIds((current) =>
+                    current.filter((serviceId) => {
+                      const service = projectDetails.services.find((item) => item.id === serviceId);
+                      return service ? servicePreviewForEnvironment(service, environmentId).kind !== "unsupported" : false;
+                    })
+                  );
+                }}
                 disabled={busy}
                 options={projectDetails.environments.map((env) => ({ value: env.id, label: env.name }))}
               />
@@ -361,35 +418,38 @@ export function RailwayImportModal({ open, onClose, onSuccess }: RailwayImportMo
             <div className="border border-zinc-700 bg-zinc-900/85 overflow-hidden">
               <div className="max-h-[160px] overflow-y-auto divide-y divide-zinc-800">
                 {projectDetails.services.map((service) => {
+                  const preview = servicePreviewForEnvironment(service, selectedEnvironmentId);
                   const isChecked = selectedServiceIds.includes(service.id);
-                  const lowercase = service.name.toLowerCase();
-                  const isDb = lowercase.includes("timescale") || lowercase.includes("postgres") || lowercase.includes("mysql") || lowercase.includes("redis") || lowercase.includes("mongo");
+                  const isUnsupported = preview.kind === "unsupported";
                   
                   return (
                     <div
                       key={service.id}
-                      className="flex items-center justify-between px-4 py-2.5 hover:bg-zinc-800/40 transition-colors"
+                      className={`flex items-center justify-between gap-3 px-4 py-2.5 transition-colors ${isUnsupported ? "bg-amber-950/10" : "hover:bg-zinc-800/40"}`}
                     >
                       <Checkbox
                         checked={isChecked}
                         onChange={() => {
+                          if (isUnsupported) return;
                           if (isChecked) {
                             setSelectedServiceIds(selectedServiceIds.filter(id => id !== service.id));
                           } else {
                             setSelectedServiceIds([...selectedServiceIds, service.id]);
                           }
                         }}
-                        disabled={busy}
+                        disabled={busy || isUnsupported}
                         label={`Select ${service.name}`}
                       >
-                        <span className="text-xs font-semibold text-zinc-100 font-mono">{service.name}</span>
+                        <span className="grid min-w-0 gap-1">
+                          <span className="text-xs font-semibold text-zinc-100 font-mono">{service.name}</span>
+                          <span className={`max-w-[260px] truncate text-[10px] font-mono ${isUnsupported ? "text-amber-200/80" : "text-zinc-500"}`}>
+                            {preview.unsupportedReason || preview.sourceLabel}
+                          </span>
+                        </span>
                       </Checkbox>
-                      <span className={`px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${
-                        isDb 
-                          ? "border-[#4FB8B2]/30 bg-[#4FB8B2]/5 text-[#4FB8B2]" 
-                          : "border-purple-500/30 bg-purple-500/5 text-purple-400"
-                      }`}>
-                        {isDb ? "Database" : "App Service"}
+                      <span className={`inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider font-semibold border ${serviceKindClass(preview.kind)}`}>
+                        <AppIcon icon={serviceKindIcon(preview.kind)} size={12} />
+                        {serviceKindLabel(preview.kind)}
                       </span>
                     </div>
                   );
