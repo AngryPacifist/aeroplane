@@ -11,6 +11,7 @@ import { recordServiceImportSource } from "./service-import-sources.js";
 import { getSystemSettings } from "./system-settings.js";
 import { fetchRailwayGraphQL } from "./railway-graphql.js";
 import { getRailwayServiceDomainInfo, importRailwayCustomDomains, railwayServiceTargetPort, type RailwayServiceDomainInfo } from "./railway-custom-domains.js";
+import { DOCKER_IMAGE_REPO_URL, dockerImageRepoFullName, validateDockerImageReference } from "../shared/service-source.js";
 
 type GraphQLTypeRef = {
   kind?: string | null;
@@ -26,11 +27,30 @@ type GraphQLField = {
 type RailwayServiceSourceInfo = {
   repo?: string;
   image?: string;
+  sourceType?: string;
   rootDirectory?: string;
   installCommand?: string;
   buildCommand?: string;
   startCommand?: string;
   staticOutput?: string;
+};
+
+type RailwayServiceKind = "git" | "database" | "docker-image" | "unsupported";
+
+type RailwayServiceClassification = {
+  kind: RailwayServiceKind;
+  repoUrl?: string;
+  repoFullName?: string;
+  image?: string;
+  dbType?: string;
+  internalPort?: number;
+  sourceLabel: string;
+  unsupportedReason?: string;
+};
+
+type RailwayEnvironmentPreview = {
+  id: string;
+  name: string;
 };
 
 const optionalServiceInstanceFields = [
@@ -114,6 +134,135 @@ function numericPort(value: unknown) {
   return null;
 }
 
+function normalizedGitRepo(value: string) {
+  const repoFullName = value.replace("https://github.com/", "").replace(/\.git$/, "");
+  const repoUrl = value.startsWith("http") ? value : `https://github.com/${value}`;
+  return { repoFullName, repoUrl };
+}
+
+function dockerImagePathParts(image: string) {
+  const withoutDigest = image.trim().toLowerCase().split("@")[0] ?? "";
+  const slashIndex = withoutDigest.lastIndexOf("/");
+  const withoutTag = slashIndex >= 0
+    ? `${withoutDigest.slice(0, slashIndex + 1)}${withoutDigest.slice(slashIndex + 1).replace(/:[^:]+$/, "")}`
+    : withoutDigest.replace(/:[^:]+$/, "");
+  const parts = withoutTag.split("/").filter(Boolean);
+  const first = parts[0] ?? "";
+  if (first.includes(".") || first.includes(":") || first === "localhost") {
+    return parts.slice(1);
+  }
+  return parts;
+}
+
+function databaseTypeFromImage(image: string) {
+  const parts = dockerImagePathParts(image);
+  const name = parts.at(-1) ?? "";
+  const path = parts.join("/");
+
+  if (!name) return null;
+  if (path.includes("timescale/timescaledb") || name.includes("timescaledb") || name.includes("timescale")) return "timescale";
+  if (path === "postgis/postgis" || name === "postgres" || name.startsWith("postgres-") || name.includes("postgresql")) return "postgres";
+  if (name === "mysql" || name.startsWith("mysql-") || name === "mariadb" || name.startsWith("mariadb-")) return "mysql";
+  if (name === "redis" || name.startsWith("redis-")) return "redis";
+  if (name === "mongo" || name === "mongodb" || name.startsWith("mongo-") || name.startsWith("mongodb-")) return "mongodb";
+  if (path.includes("clickhouse/clickhouse-server") || name === "clickhouse" || name === "clickhouse-server") return "clickhouse";
+  return null;
+}
+
+function databaseTypeFromName(name: string) {
+  const lowercaseName = name.toLowerCase();
+  if (
+    lowercaseName.includes("timescale") ||
+    lowercaseName.includes("postgres") ||
+    lowercaseName.includes("mysql") ||
+    lowercaseName.includes("redis") ||
+    lowercaseName.includes("mongo") ||
+    lowercaseName.includes("clickhouse")
+  ) {
+    return normalizeDatabaseType(lowercaseName);
+  }
+  return null;
+}
+
+function classifyRailwayServiceSource(serviceName: string, sourceInfo?: RailwayServiceSourceInfo, trigger?: { repository?: string | null }): RailwayServiceClassification {
+  if (trigger?.repository) {
+    const git = normalizedGitRepo(trigger.repository);
+    return {
+      kind: "git",
+      ...git,
+      sourceLabel: git.repoFullName
+    };
+  }
+
+  if (sourceInfo?.repo) {
+    const git = normalizedGitRepo(sourceInfo.repo);
+    return {
+      kind: "git",
+      ...git,
+      sourceLabel: git.repoFullName
+    };
+  }
+
+  if (sourceInfo?.image) {
+    const validation = validateDockerImageReference(sourceInfo.image);
+    if (!validation.ok) {
+      return {
+        kind: "unsupported",
+        sourceLabel: sourceInfo.image,
+        unsupportedReason: validation.error
+      };
+    }
+
+    const dbType = databaseTypeFromImage(validation.image);
+    if (dbType) {
+      return {
+        kind: "database",
+        image: validation.image,
+        dbType,
+        repoUrl: "database",
+        repoFullName: `database:${dbType}`,
+        internalPort: defaultDatabasePort(dbType),
+        sourceLabel: `${dbType} database image`
+      };
+    }
+
+    return {
+      kind: "docker-image",
+      image: validation.image,
+      repoUrl: DOCKER_IMAGE_REPO_URL,
+      repoFullName: dockerImageRepoFullName(validation.image),
+      sourceLabel: validation.image
+    };
+  }
+
+  if (sourceInfo) {
+    const sourceType = sourceInfo.sourceType ? ` (${sourceInfo.sourceType})` : "";
+    return {
+      kind: "unsupported",
+      sourceLabel: `Unsupported Railway source${sourceType}`,
+      unsupportedReason: "This Railway service is not backed by a Git repository or Docker image source Aeroplane can import yet."
+    };
+  }
+
+  const dbType = databaseTypeFromName(serviceName);
+  if (dbType) {
+    return {
+      kind: "database",
+      dbType,
+      repoUrl: "database",
+      repoFullName: `database:${dbType}`,
+      internalPort: defaultDatabasePort(dbType),
+      sourceLabel: `${dbType} database`
+    };
+  }
+
+  return {
+    kind: "unsupported",
+    sourceLabel: "Unsupported source",
+    unsupportedReason: "This Railway service does not expose a Git repository or Docker image source Aeroplane can import yet."
+  };
+}
+
 export async function getRailwayProjects(token: string) {
   const query = `
     query GetRailwayProjects {
@@ -163,6 +312,14 @@ export async function getRailwayProjectDetails(token: string, railwayProjectId: 
             node {
               id
               name
+              repoTriggers {
+                edges {
+                  node {
+                    repository
+                    branch
+                  }
+                }
+              }
             }
           }
         }
@@ -171,6 +328,18 @@ export async function getRailwayProjectDetails(token: string, railwayProjectId: 
             node {
               id
               name
+              serviceInstances {
+                edges {
+                  node {
+                    serviceId
+                    source {
+                      __typename
+                      repo
+                      image
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -184,15 +353,65 @@ export async function getRailwayProjectDetails(token: string, railwayProjectId: 
     throw new Error("Railway project not found");
   }
 
-  const services = (project.services?.edges ?? []).map((e: any) => ({
+  const environments: RailwayEnvironmentPreview[] = (project.environments?.edges ?? []).map((e: any) => ({
     id: e.node.id,
     name: e.node.name
   }));
+  const firstEnvironmentId = environments[0]?.id ?? "";
+  const sourcesByEnvironment = new Map<string, Map<string, RailwayServiceSourceInfo>>();
+  for (const envEdge of project.environments?.edges ?? []) {
+    const envNode = envEdge?.node;
+    if (!envNode?.id) continue;
+    const sourceMap = new Map<string, RailwayServiceSourceInfo>();
+    for (const instanceEdge of envNode.serviceInstances?.edges ?? []) {
+      const instanceNode = instanceEdge?.node;
+      if (!instanceNode?.serviceId) continue;
+      sourceMap.set(instanceNode.serviceId, {
+        repo: instanceNode.source?.repo || undefined,
+        image: instanceNode.source?.image || undefined,
+        sourceType: instanceNode.source?.__typename || undefined
+      });
+    }
+    sourcesByEnvironment.set(envNode.id, sourceMap);
+  }
 
-  const environments = (project.environments?.edges ?? []).map((e: any) => ({
-    id: e.node.id,
-    name: e.node.name
-  }));
+  const services = (project.services?.edges ?? []).map((e: any) => {
+    const serviceNode = e.node;
+    const trigger = serviceNode.repoTriggers?.edges?.[0]?.node;
+    const classifications = Object.fromEntries(
+      environments.map((environment) => {
+        const classification = classifyRailwayServiceSource(
+          serviceNode.name,
+          sourcesByEnvironment.get(environment.id)?.get(serviceNode.id),
+          trigger
+        );
+        return [
+          environment.id,
+          {
+            kind: classification.kind,
+            sourceLabel: classification.sourceLabel,
+            unsupportedReason: classification.unsupportedReason ?? null,
+            dbType: classification.dbType ?? null,
+            image: classification.image ?? null
+          }
+        ];
+      })
+    );
+    const defaultClassification = classifications[firstEnvironmentId] ?? {
+      kind: "unsupported",
+      sourceLabel: "Unsupported source",
+      unsupportedReason: "No Railway environment source was found.",
+      dbType: null,
+      image: null
+    };
+
+    return {
+      id: serviceNode.id,
+      name: serviceNode.name,
+      ...defaultClassification,
+      sourcesByEnvironment: classifications
+    };
+  });
 
   return {
     id: project.id,
@@ -267,6 +486,7 @@ export async function importRailwayProject(token: string, railwayProjectId: stri
                   node {
                     serviceId
                     source {
+                      __typename
                       repo
                       image
                     }
@@ -310,6 +530,7 @@ ${serviceInstanceCommandSelection}
         serviceSourceMap.set(node.serviceId, {
           repo: node.source?.repo || undefined,
           image: node.source?.image || undefined,
+          sourceType: node.source?.__typename || undefined,
           rootDirectory: cleanOptionalString(node.rootDirectory),
           installCommand: cleanOptionalString(node.installCommand),
           buildCommand: cleanOptionalString(node.buildCommand),
@@ -327,6 +548,7 @@ ${serviceInstanceCommandSelection}
     railwayServiceId: string;
     name: string;
     isDatabase: boolean;
+    isDockerImage: boolean;
     dbType: string | null;
   }> = [];
   let importedCustomDomainCount = 0;
@@ -364,6 +586,7 @@ ${serviceInstanceCommandSelection}
     let branch = "main";
     let internalPort = 8080;
     let isDatabase = false;
+    let isDockerImage = false;
 
     let rootDir: string | null = null;
     let installCommand: string | null = null;
@@ -378,10 +601,6 @@ ${serviceInstanceCommandSelection}
     const firstTrigger = triggersEdges[0]?.node;
     if (firstTrigger) {
       branch = firstTrigger.branch || "main";
-      if (firstTrigger.repository) {
-        repoFullName = firstTrigger.repository.replace("https://github.com/", "").replace(/\.git$/, "");
-        repoUrl = firstTrigger.repository.startsWith("http") ? firstTrigger.repository : `https://github.com/${firstTrigger.repository}`;
-      }
     }
 
     // 2. Resolve from serviceSourceMap (fallback for repo, or container image details)
@@ -394,45 +613,20 @@ ${serviceInstanceCommandSelection}
       buildCommand = sourceInfo.buildCommand ?? null;
       startCommand = sourceInfo.startCommand ?? null;
       staticOutput = sourceInfo.staticOutput ?? null;
-      if (sourceInfo.repo && !repoUrl) {
-        repoFullName = sourceInfo.repo.replace("https://github.com/", "").replace(/\.git$/, "");
-        repoUrl = sourceInfo.repo.startsWith("http") ? sourceInfo.repo : `https://github.com/${sourceInfo.repo}`;
-      } else if (sourceInfo.image) {
-        if (config.importDatabases === false) {
-          continue; // Skip database container
-        }
-        isDatabase = true;
-        const dbType = normalizeDatabaseType(sourceInfo.image);
-        repoUrl = "database";
-        repoFullName = `database:${dbType}`;
-        internalPort = defaultDatabasePort(dbType);
-      }
     }
 
-    // Auto-detect database types from service name
-    const lowercaseName = serviceName.toLowerCase();
-    if (!repoUrl) {
-      if (
-        lowercaseName.includes("timescale") ||
-        lowercaseName.includes("postgres") ||
-        lowercaseName.includes("mysql") ||
-        lowercaseName.includes("redis") ||
-        lowercaseName.includes("mongo")
-      ) {
-        if (config.importDatabases === false) {
-          continue; // Skip database container
-        }
-        isDatabase = true;
-        repoUrl = "database";
-        const dbType = normalizeDatabaseType(lowercaseName);
-        repoFullName = `database:${dbType}`;
-        internalPort = defaultDatabasePort(dbType);
-      } else {
-        // Fallback placeholder repo
-        repoUrl = "https://github.com/railpack/railpack";
-        repoFullName = "railpack/railpack";
-      }
+    const classification = classifyRailwayServiceSource(serviceName, sourceInfo, firstTrigger);
+    if (classification.kind === "unsupported") {
+      continue;
     }
+    if (classification.kind === "database" && config.importDatabases === false) {
+      continue;
+    }
+    isDatabase = classification.kind === "database";
+    isDockerImage = classification.kind === "docker-image";
+    repoUrl = classification.repoUrl ?? "";
+    repoFullName = classification.repoFullName ?? "";
+    internalPort = classification.internalPort ?? internalPort;
 
     if (!isDatabase && targetEnvId) {
       try {
@@ -499,15 +693,16 @@ ${serviceInstanceCommandSelection}
       rootDir,
       githubToken: null,
       webhookSecret: nanoid(24),
-      installCommand: isDatabase ? null : installCommand,
-      buildCommand: isDatabase ? null : buildCommand,
-      startCommand: isDatabase ? null : startCommand,
-      staticOutput: isDatabase ? null : staticOutput,
+      installCommand: isDatabase || isDockerImage ? null : installCommand,
+      buildCommand: isDatabase || isDockerImage ? null : buildCommand,
+      startCommand: isDatabase || isDockerImage ? null : startCommand,
+      staticOutput: isDatabase || isDockerImage ? null : staticOutput,
       internalPort,
       hostPort,
       activePort: null,
       databasePublicEnabled: isDatabase,
       databasePublicHostname,
+      postgresLogicalReplicationEnabled: false,
       status: "idle",
       lastDeployedAt: null,
       createdAt: timestamp,
@@ -544,6 +739,7 @@ ${serviceInstanceCommandSelection}
       metadata: {
         projectName: rProject.name,
         environmentName: targetEnvName ?? null,
+        sourceKind: classification.kind,
         sourceRepo: sourceInfo?.repo ?? null,
         sourceImage: sourceInfo?.image ?? null
       }
@@ -582,6 +778,7 @@ ${serviceInstanceCommandSelection}
       railwayServiceId: serviceId,
       name: serviceName,
       isDatabase,
+      isDockerImage,
       dbType: isDatabase ? repoFullName.split(":")[1] || "postgres" : null
     });
   }
