@@ -50,6 +50,7 @@ import { formatBuildDuration } from "./service-format";
 import { RuntimeLogsPanel } from "./service-log-panels";
 import { ServiceOverviewPanel } from "./service-overview-panel";
 import { ServicePageSkeleton } from "./service-page-skeleton";
+import { RedeployRequiredToast } from "./redeploy-required-toast";
 import type { ServiceTab } from "./service-tabs";
 
 function textOrNull(value: string) {
@@ -71,6 +72,10 @@ const serviceTabLabels: Record<ServiceTab, string> = {
 
 function deploymentIsPending(status: string) {
   return status === "queued" || status === "building";
+}
+
+function actionRequiresRedeploy(label: string) {
+  return label === "env" || label === "settings";
 }
 
 export function ServicePageShell({
@@ -127,6 +132,7 @@ export function ServicePageShell({
   const [settingsDirectoryError, setSettingsDirectoryError] = useState("");
   const [settingsDirectoryLoadingPaths, setSettingsDirectoryLoadingPaths] = useState<Set<string>>(new Set());
   const [overviewLoading, setOverviewLoading] = useState(true);
+  const [redeployToastVisible, setRedeployToastVisible] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -312,6 +318,9 @@ export function ServicePageShell({
       await action();
       await loadOverview({ showLoading: false });
       await onProjectRefresh();
+      if (actionRequiresRedeploy(label)) {
+        setRedeployToastVisible(true);
+      }
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Something went wrong");
     } finally {
@@ -400,10 +409,16 @@ export function ServicePageShell({
   }
 
   async function deployService() {
+    setRedeployToastVisible(false);
     await doAction("deploy", async () => {
       const result = await api.createDeployment(serviceId);
       startTransition(() => setActiveDeploymentId(result.deployment.id));
     });
+  }
+
+  function deployFromToast() {
+    onTabChange("deployments");
+    void deployService();
   }
 
   async function transferService(targetProjectId: string) {
@@ -465,11 +480,12 @@ export function ServicePageShell({
   const deployments = overview?.deployments ?? [];
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
+  const hasPendingDeployment = deploymentIsPending(service?.status ?? "") || deployments.some((deployment) => deploymentIsPending(deployment.status));
   const activeDeploymentDuration =
     activeDeployment && deploymentIsPending(activeDeployment.status)
       ? formatBuildDuration(activeDeployment.startedAt ?? activeDeployment.createdAt, activeDeployment.finishedAt, nowMs)
       : null;
-  const transferDisabled = Boolean(busy) || deploymentIsPending(service?.status ?? "") || deployments.some((deployment) => deploymentIsPending(deployment.status));
+  const transferDisabled = Boolean(busy) || hasPendingDeployment;
   const shellClass = "relative isolate h-dvh overflow-hidden bg-zinc-950 text-zinc-100";
   const viewportClass = "relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col px-5 py-10 sm:px-6 lg:px-10";
   const panelClass = "flex min-h-0 w-full flex-1 flex-col";
@@ -516,6 +532,12 @@ export function ServicePageShell({
                 <button key={tab} type="button" className={tabButtonClass(tab)} onClick={() => onTabChange(tab)}>
                   <AppIcon icon={icon} size={15} />
                   <span>{serviceTabLabels[tab]}</span>
+                  {tab === "deployments" && hasPendingDeployment ? (
+                    <span className="inline-flex items-center gap-1 border border-amber-400/35 bg-amber-400/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
+                      Deploying
+                    </span>
+                  ) : null}
                 </button>
               ))}
             </div>
@@ -806,6 +828,13 @@ export function ServicePageShell({
         busy={busy === "transfer"}
         onClose={() => setTransferOpen(false)}
         onTransfer={transferService}
+      />
+      <RedeployRequiredToast
+        visible={redeployToastVisible}
+        busy={busy === "deploy"}
+        serviceName={service?.name ?? "Service"}
+        onDismiss={() => setRedeployToastVisible(false)}
+        onRedeploy={deployFromToast}
       />
     </>
   );
