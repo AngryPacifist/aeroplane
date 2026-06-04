@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
-import { prepareRailwayPostgresDataImport, startRailwayPostgresDataImportJob } from "./database-data-imports.js";
+import { prepareRailwayPostgresDataImport, startRailwayPostgresDataImportJob, startRailwayRedisDataImportJob } from "./database-data-imports.js";
 import { db } from "./db.js";
 import { enqueueDeployment, getServiceById } from "./deploy.js";
 import { deployments } from "./schema.js";
@@ -39,7 +39,8 @@ async function waitForDeploymentsToSettle(deploymentIds: string[]) {
 function serviceReadyForRailwayDataImport(serviceId: string) {
   const service = getServiceById(serviceId);
   if (!service || !isDatabaseService(service)) return false;
-  return service.status === "active" && isPostgresFamilyDatabase(databaseTypeForService(service));
+  const dbType = databaseTypeForService(service);
+  return service.status === "active" && (isPostgresFamilyDatabase(dbType) || dbType === "redis");
 }
 
 function queueDeployments(serviceIds: string[]) {
@@ -52,7 +53,10 @@ async function runRailwayImportAutomation(input: RailwayImportAutomationInput) {
   if (input.importDatabaseData && input.databaseServiceIds.length > 0) {
     for (const serviceId of input.databaseServiceIds) {
       try {
-        await prepareRailwayPostgresDataImport(serviceId, input.railwayToken);
+        const service = getServiceById(serviceId);
+        if (service && isPostgresFamilyDatabase(databaseTypeForService(service))) {
+          await prepareRailwayPostgresDataImport(serviceId, input.railwayToken);
+        }
       } catch (error) {
         console.warn("Railway database import preparation failed:", error);
       }
@@ -67,7 +71,14 @@ async function runRailwayImportAutomation(input: RailwayImportAutomationInput) {
   if (input.importDatabaseData) {
     for (const serviceId of input.databaseServiceIds) {
       if (!serviceReadyForRailwayDataImport(serviceId)) continue;
-      startRailwayPostgresDataImportJob(serviceId, input.railwayToken);
+      const service = getServiceById(serviceId);
+      if (!service) continue;
+      const dbType = databaseTypeForService(service);
+      if (isPostgresFamilyDatabase(dbType)) {
+        startRailwayPostgresDataImportJob(serviceId, input.railwayToken);
+      } else if (dbType === "redis") {
+        startRailwayRedisDataImportJob(serviceId, input.railwayToken);
+      }
     }
   }
 
