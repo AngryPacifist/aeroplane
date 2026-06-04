@@ -2,10 +2,12 @@ import { PackageIcon } from "@hugeicons/core-free-icons";
 import { useMemo } from "react";
 import { validateDockerImageReference } from "../../../shared/service-source";
 import { AppIcon, FieldLabel, FormInput, SectionTitle } from "../ui/primitives";
+import { RuntimeModeControl } from "../ui/runtime-mode-control";
 
 type DockerImageServiceSettings = {
   name: string;
   dockerImage: string;
+  runtimeMode: "web" | "worker";
   internalPort: number;
 };
 
@@ -29,18 +31,24 @@ export function DockerImageServiceSettingsPanel({
         <FieldLabel>Service name</FieldLabel>
         <FormInput value={settings.name} onChange={(event) => onChange({ name: event.target.value })} required />
       </div>
-      <div>
-        <FieldLabel>Internal port</FieldLabel>
-        <FormInput
-          type="number"
-          min={1}
-          max={65535}
-          value={settings.internalPort}
-          onChange={(event) => onChange({ internalPort: Number(event.target.value) })}
-          required
-        />
-        {hostPort ? <p className="mt-2 text-xs text-zinc-500">Traffic is routed through host port {hostPort}.</p> : null}
+      <div className="xl:col-span-2">
+        <FieldLabel>Runtime mode</FieldLabel>
+        <RuntimeModeControl value={settings.runtimeMode} onChange={(runtimeMode) => onChange({ runtimeMode })} />
       </div>
+      {settings.runtimeMode !== "worker" ? (
+        <div>
+          <FieldLabel>Internal port</FieldLabel>
+          <FormInput
+            type="number"
+            min={1}
+            max={65535}
+            value={settings.internalPort}
+            onChange={(event) => onChange({ internalPort: Number(event.target.value) })}
+            required
+          />
+          {hostPort ? <p className="mt-2 text-xs text-zinc-500">Traffic is routed through host port {hostPort}.</p> : null}
+        </div>
+      ) : null}
       <div className="xl:col-span-2">
         <FieldLabel>Image reference</FieldLabel>
         <div className="flex items-center gap-3 border border-zinc-700 bg-zinc-900/88 p-4">
