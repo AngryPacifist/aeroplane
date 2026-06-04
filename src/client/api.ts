@@ -591,6 +591,8 @@ export const api = {
   serviceOverview: (serviceId: string) => request<ServiceOverview>(`/api/services/${serviceId}/overview`),
   updateService: (serviceId: string, body: unknown) =>
     request<{ service: Service }>(`/api/services/${serviceId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  transferService: (serviceId: string, body: { targetProjectId: string }) =>
+    request<{ service: Service; project: ProjectDetail }>(`/api/services/${serviceId}/transfer`, { method: "POST", body: JSON.stringify(body) }),
   deleteService: (serviceId: string) => request(`/api/services/${serviceId}`, { method: "DELETE" }),
   createDeployment: (serviceId: string) =>
     request<{ deployment: Deployment }>(`/api/services/${serviceId}/deployments`, { method: "POST" }),
