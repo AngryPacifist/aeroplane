@@ -5,6 +5,7 @@ import { isDatabaseService } from "./database-urls.js";
 import { domains, services, type Service } from "./schema.js";
 import { normalizeRootDomain } from "./root-domain.js";
 import { getSystemSettings } from "./system-settings.js";
+import { isWorkerService } from "../shared/service-runtime.js";
 
 function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -39,7 +40,7 @@ function uniqueGeneratedHostname(serviceSlug: string, rootDomain: string) {
 
 export function ensureDefaultDomainForService(service: Service, rootDomainInput = getSystemSettings().rootDomain) {
   const rootDomain = normalizeRootDomain(rootDomainInput);
-  if (!rootDomain || isDatabaseService(service)) return null;
+  if (!rootDomain || isDatabaseService(service) || isWorkerService(service)) return null;
 
   const existingServiceDomains = db.select().from(domains).where(eq(domains.serviceId, service.id)).all();
   const existingGeneratedDomain = existingServiceDomains.find((domain) => isGeneratedServiceHostname(service.slug, domain.hostname, rootDomain));
