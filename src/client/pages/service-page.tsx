@@ -102,6 +102,13 @@ export function ServicePage({
     });
   }
 
+  function navigateToTransferredService(nextProjectSlug: string, nextServiceSlug: string) {
+    void navigate({
+      to: "/$projectSlug/$serviceSlug",
+      params: { projectSlug: nextProjectSlug, serviceSlug: nextServiceSlug },
+    });
+  }
+
   if (error) {
     return (
       <main className="relative isolate min-h-dvh overflow-hidden bg-zinc-950 px-5 py-12 text-zinc-100">
@@ -162,6 +169,7 @@ export function ServicePage({
       onDeleted={navigateToProject}
       pageServices={currentProject.services}
       onServiceSelect={navigateToService}
+      onTransferred={navigateToTransferredService}
     />
   );
 }
