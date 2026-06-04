@@ -8,6 +8,7 @@ import {
   FolderOpenIcon,
   GitBranchIcon,
   GithubIcon,
+  PackageIcon,
   PencilEdit02Icon,
   Globe02Icon,
 } from "@hugeicons/core-free-icons";
@@ -33,6 +34,7 @@ import { ProjectPageToolbar } from "../features/projects/project-page-toolbar";
 import type { ServiceFormPayload } from "../features/services/service-form-types";
 import { formatTime } from "../lib/format";
 import { usePageTitle } from "../lib/page-title";
+import { dockerImageForService, isDatabaseService, isDockerImageService } from "../../shared/service-source";
 
 function StatusPill({ status }: { status: string }) {
   const tone =
@@ -364,15 +366,16 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
               ) : currentProject ? (
                 <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
                   {currentProject.services.map((service) => {
-                    const isDatabase =
-                      service.repoUrl === "database" ||
-                      (service.repoFullName?.startsWith("database:") ?? false);
+                    const isDatabase = isDatabaseService(service);
+                    const isDockerImage = isDockerImageService(service);
                     const visibleUrl = (
                       service.primaryUrl || service.localUrl
                     ).replace("127.0.0.1", window.location.hostname);
                     const visibleLabel = visibleUrl.replace(/^https?:\/\//, "");
                     const repoLabel =
-                      service.repoFullName ??
+                      service.dockerImage ||
+                      (isDockerImage ? dockerImageForService(service) : "") ||
+                      service.repoFullName ||
                       service.repoUrl
                         .replace(/^https?:\/\//, "")
                         .replace(/^github\.com\//, "");
@@ -415,7 +418,7 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                                 fallback={
                                   <AppIcon
                                     icon={
-                                      isDatabase ? CloudServerIcon : Globe02Icon
+                                      isDatabase ? CloudServerIcon : isDockerImage ? PackageIcon : Globe02Icon
                                     }
                                     size={20}
                                     className="text-zinc-400"
@@ -501,23 +504,25 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                             <>
                               <div className="mt-5 inline-flex max-w-full items-center gap-2 rounded-full bg-zinc-800/90 px-3 py-1.5 text-xs font-normal text-zinc-300">
                                 <AppIcon
-                                  icon={GithubIcon}
+                                  icon={isDockerImage ? PackageIcon : GithubIcon}
                                   size={15}
                                   className="flex-none"
                                 />
                                 <span className="truncate">{repoLabel}</span>
                               </div>
 
-                              <div className="mt-4 flex min-w-0 items-center gap-2 text-sm text-zinc-300">
-                                <AppIcon
-                                  icon={FolderOpenIcon}
-                                  size={16}
-                                  className="flex-none text-zinc-500"
-                                />
-                                <span className="truncate">
-                                  Deploys from {rootLabel}
-                                </span>
-                              </div>
+                              {isDockerImage ? null : (
+                                <div className="mt-4 flex min-w-0 items-center gap-2 text-sm text-zinc-300">
+                                  <AppIcon
+                                    icon={FolderOpenIcon}
+                                    size={16}
+                                    className="flex-none text-zinc-500"
+                                  />
+                                  <span className="truncate">
+                                    Deploys from {rootLabel}
+                                  </span>
+                                </div>
+                              )}
 
                               <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
                                 <span>
@@ -525,11 +530,15 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                                     service.lastDeployedAt ?? service.updatedAt,
                                   )}
                                 </span>
-                                <span>on</span>
-                                <span className="inline-flex items-center gap-1.5">
-                                  <AppIcon icon={GitBranchIcon} size={14} />
-                                  {service.branch}
-                                </span>
+                                {isDockerImage ? null : (
+                                  <>
+                                    <span>on</span>
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <AppIcon icon={GitBranchIcon} size={14} />
+                                      {service.branch}
+                                    </span>
+                                  </>
+                                )}
                               </div>
                             </>
                           )}
