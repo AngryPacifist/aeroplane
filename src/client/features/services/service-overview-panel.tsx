@@ -100,10 +100,8 @@ function warningItems({
 
   if (!latest) warnings.push("No deployment has run yet.");
   if (latest?.status === "failed") warnings.push("Latest deployment failed.");
-  if (latest?.status === "queued" || latest?.status === "building") warnings.push("Deployment is currently in progress.");
   if (!service.reachable && service.status !== "building" && service.status !== "queued") warnings.push("Runtime is not reachable.");
   if (!isDatabase && domains.some((domain) => domain.status !== "active")) warnings.push("One or more domains still need DNS verification.");
-  if (env.length === 0) warnings.push("No service environment variables are configured.");
   if (!isDatabase && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
 
   return warnings;
