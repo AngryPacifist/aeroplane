@@ -216,6 +216,17 @@ export type PostgresDataImportResult = {
   importedAt: string;
 };
 
+export type RedisDataImportResult = {
+  ok: true;
+  serviceId: string;
+  source: "redis-url" | "railway";
+  sourceLabel: string;
+  sourceVariableKey?: string;
+  dumpSizeBytes: number;
+  checksum: string;
+  importedAt: string;
+};
+
 export type DatabaseDataImport = {
   id: string;
   serviceId: string;
@@ -779,6 +790,16 @@ export const api = {
     }),
   importPostgresDataFromRailway: (serviceId: string, apiToken: string) =>
     request<{ result: PostgresDataImportResult }>(`/api/services/${serviceId}/database/import/railway`, {
+      method: "POST",
+      body: JSON.stringify({ apiToken })
+    }),
+  importRedisDataFromUrl: (serviceId: string, sourceUrl: string) =>
+    request<{ result: RedisDataImportResult }>(`/api/services/${serviceId}/database/import/redis-url`, {
+      method: "POST",
+      body: JSON.stringify({ sourceUrl })
+    }),
+  importRedisDataFromRailway: (serviceId: string, apiToken: string) =>
+    request<{ result: RedisDataImportResult }>(`/api/services/${serviceId}/database/import/redis-railway`, {
       method: "POST",
       body: JSON.stringify({ apiToken })
     })
