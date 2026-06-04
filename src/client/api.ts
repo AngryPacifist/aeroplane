@@ -5,6 +5,8 @@ export type Framework = {
   website: null | string;
 };
 
+export type ServiceRuntimeMode = "web" | "worker";
+
 export type Service = {
   id: string;
   projectId: string;
@@ -20,6 +22,7 @@ export type Service = {
   buildCommand: null | string;
   startCommand: null | string;
   staticOutput: null | string;
+  runtimeMode: ServiceRuntimeMode;
   internalPort: number;
   hostPort: number;
   databasePublicEnabled: boolean;
