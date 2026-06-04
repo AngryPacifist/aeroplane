@@ -21,6 +21,10 @@ import type { SystemSettingsTab } from "../components/modals/system-settings-typ
 import { SignOutButton } from "../components/auth/sign-out-button";
 import { usePageTitle } from "../lib/page-title";
 
+function serviceIsDeploying(status: string) {
+  return status === "queued" || status === "building";
+}
+
 export function ProjectsPage() {
   const navigate = useNavigate();
   usePageTitle("Projects");
@@ -38,8 +42,9 @@ export function ProjectsPage() {
   const [githubInstallOpen, setGitHubInstallOpen] = useState(false);
   const [error, setError] = useState("");
 
-  const loadProjects = useCallback(async () => {
-    setSetupLoading(true);
+  const loadProjects = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? true;
+    if (showLoading) setSetupLoading(true);
     try {
       const [projectData, systemData, githubData, domainData, r2Data] =
         await Promise.all([
@@ -84,8 +89,21 @@ export function ProjectsPage() {
   }, [loadProjects]);
 
   useEffect(() => {
+    const hasDeployingService = projects.some((project) =>
+      project.services.some((service) => serviceIsDeploying(service.status)),
+    );
+    if (!hasDeployingService) return;
+
+    const interval = setInterval(() => {
+      void loadProjects({ showLoading: false });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [loadProjects, projects]);
+
+  useEffect(() => {
     function reloadAfterSettingsClose() {
-      void loadProjects();
+      void loadProjects({ showLoading: false });
     }
 
     window.addEventListener(
