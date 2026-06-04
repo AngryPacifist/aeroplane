@@ -473,6 +473,7 @@ export type GitHubRepo = {
   name: string;
   private: boolean;
   defaultBranch: string;
+  pushedAt: string;
   updatedAt: string;
   cloneUrl: string;
 };
