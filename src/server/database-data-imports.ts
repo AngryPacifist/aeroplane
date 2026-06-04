@@ -4,6 +4,7 @@ import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { databaseTypeForService, isDatabaseService } from "./database-urls.js";
 import { db, nowIso } from "./db.js";
 import { importPostgresDataFromRailway, preparePostgresDataImportFromRailway } from "./postgres-data-import.js";
+import { importRedisDataFromRailway } from "./redis-data-import.js";
 import { getRailwayImportSource } from "./service-import-sources.js";
 import { databaseDataImports, type DatabaseDataImport } from "./schema.js";
 import { getServiceById } from "./deploy.js";
@@ -44,15 +45,29 @@ function publicDatabaseDataImport(row: DatabaseDataImport): PublicDatabaseDataIm
   };
 }
 
-function assertPostgresDatabaseService(serviceId: string) {
+function assertDatabaseService(serviceId: string) {
   const service = getServiceById(serviceId);
   if (!service || !isDatabaseService(service)) {
     throw new Error("Database service not found");
   }
 
   const engine = databaseTypeForService(service);
+  return { service, engine };
+}
+
+function assertPostgresDatabaseService(serviceId: string) {
+  const { service, engine } = assertDatabaseService(serviceId);
   if (!isPostgresFamilyDatabase(engine)) {
     throw new Error("Railway data import is only available for Postgres-compatible services.");
+  }
+
+  return { service, engine };
+}
+
+function assertRedisDatabaseService(serviceId: string) {
+  const { service, engine } = assertDatabaseService(serviceId);
+  if (engine !== "redis") {
+    throw new Error("Railway data import is only available for Redis services.");
   }
 
   return { service, engine };
@@ -98,8 +113,34 @@ async function runRailwayPostgresImportJob(importId: string, serviceId: string, 
   }
 }
 
+async function runRailwayRedisImportJob(importId: string, serviceId: string, apiToken: string) {
+  activeImports.add(importId);
+  updateImport(importId, { status: "running", startedAt: nowIso() });
+
+  try {
+    const result = await importRedisDataFromRailway(serviceId, apiToken);
+    updateImport(importId, {
+      status: "succeeded",
+      sourceLabel: result.sourceLabel,
+      sourceVariableKey: result.sourceVariableKey ?? null,
+      dumpSizeBytes: result.dumpSizeBytes,
+      checksum: result.checksum,
+      error: null,
+      finishedAt: result.importedAt
+    });
+  } catch (error) {
+    updateImport(importId, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Could not import Railway Redis data",
+      finishedAt: nowIso()
+    });
+  } finally {
+    activeImports.delete(importId);
+  }
+}
+
 export function listDatabaseDataImports(serviceId: string) {
-  assertPostgresDatabaseService(serviceId);
+  assertDatabaseService(serviceId);
   return db
     .select()
     .from(databaseDataImports)
@@ -136,6 +177,35 @@ export function startRailwayPostgresDataImportJob(serviceId: string, apiToken: s
 
   db.insert(databaseDataImports).values(row).run();
   void runRailwayPostgresImportJob(importId, serviceId, apiToken);
+  return publicDatabaseDataImport(row);
+}
+
+export function startRailwayRedisDataImportJob(serviceId: string, apiToken: string) {
+  const { engine } = assertRedisDatabaseService(serviceId);
+  const activeImport = latestActiveImport(serviceId);
+  if (activeImport) return publicDatabaseDataImport(activeImport);
+
+  const source = getRailwayImportSource(serviceId);
+  const importId = nanoid(10);
+  const timestamp = nowIso();
+  const row = {
+    id: importId,
+    serviceId,
+    engine,
+    source: "railway",
+    sourceLabel: source?.externalServiceName ?? "Railway Redis",
+    sourceVariableKey: null,
+    status: "queued",
+    dumpSizeBytes: null,
+    checksum: null,
+    error: null,
+    createdAt: timestamp,
+    startedAt: null,
+    finishedAt: null
+  };
+
+  db.insert(databaseDataImports).values(row).run();
+  void runRailwayRedisImportJob(importId, serviceId, apiToken);
   return publicDatabaseDataImport(row);
 }
 
