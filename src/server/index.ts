@@ -315,6 +315,9 @@ const updateServiceSchema = z.object({
   databasePublicEnabled: z.boolean().optional(),
   databasePublicHostname: publicHostnameSchema
 });
+const transferServiceSchema = z.object({
+  targetProjectId: z.string().trim().min(1)
+});
 
 function parseDatabaseFilters(raw: string | undefined): DatabaseRowFilter[] {
   if (!raw) return [];
@@ -1869,6 +1872,70 @@ app.patch("/api/services/:serviceId", async (c) => {
 
   const updated = getServiceById(service.id);
   return c.json({ service: updated ? await publicService(updated) : null });
+});
+
+app.post("/api/services/:serviceId/transfer", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service) {
+    return jsonError("Service not found", 404);
+  }
+
+  const body = transferServiceSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid transfer");
+  }
+
+  const targetProject = getProjectById(body.data.targetProjectId);
+  if (!targetProject) {
+    return jsonError("Target project not found", 404);
+  }
+  if (targetProject.id === service.projectId) {
+    return jsonError("Choose a different project for this service.");
+  }
+
+  const latestDeployment = db
+    .select({ status: deployments.status })
+    .from(deployments)
+    .where(eq(deployments.serviceId, service.id))
+    .orderBy(desc(deployments.createdAt))
+    .limit(1)
+    .get();
+  if (service.status === "queued" || service.status === "building" || latestDeployment?.status === "queued" || latestDeployment?.status === "building") {
+    return jsonError("Wait for the current deployment to finish before moving this service.", 409);
+  }
+
+  const timestamp = nowIso();
+  const targetSlugs = getServiceSlugSet(targetProject.id);
+  const nextSlug = targetSlugs.has(service.slug) ? createUniqueSlug(service.name, targetSlugs) : service.slug;
+  const sourceProjectId = service.projectId;
+
+  db.update(services)
+    .set({
+      projectId: targetProject.id,
+      slug: nextSlug,
+      updatedAt: timestamp
+    })
+    .where(eq(services.id, service.id))
+    .run();
+  db.update(projectGroups).set({ updatedAt: timestamp }).where(eq(projectGroups.id, sourceProjectId)).run();
+  db.update(projectGroups).set({ updatedAt: timestamp }).where(eq(projectGroups.id, targetProject.id)).run();
+
+  const updated = getServiceById(service.id);
+  if (!updated) {
+    return jsonError("Service not found after transfer", 404);
+  }
+
+  ensureDefaultDomainForService(updated);
+  syncProjectDatabaseConnectionEnv(sourceProjectId);
+  syncProjectDatabaseConnectionEnv(targetProject.id);
+  const caddy = await writeAndReloadCaddy();
+  const updatedTargetProject = getProjectById(targetProject.id) ?? targetProject;
+
+  return c.json({
+    service: await publicService(updated),
+    project: await summarizeProject(updatedTargetProject, getServicesForProject(updatedTargetProject.id)),
+    caddy
+  });
 });
 
 app.delete("/api/services/:serviceId", async (c) => {
