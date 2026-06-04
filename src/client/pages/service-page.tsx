@@ -36,8 +36,9 @@ export function ServicePage({
     [serviceTab],
   );
 
-  const loadProject = useCallback(async () => {
-    setLoading(true);
+  const loadProject = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? true;
+    if (showLoading) setLoading(true);
     try {
       const result = await api.project(projectSlug);
       startTransition(() => {
@@ -65,6 +66,10 @@ export function ServicePage({
   const currentProject = project?.slug === projectSlug ? project : null;
   const service =
     currentProject?.services.find((item) => item.slug === serviceSlug) ?? null;
+  const refreshProjectInBackground = useCallback(
+    () => loadProject({ showLoading: false }),
+    [loadProject],
+  );
   usePageTitle(
     service
       ? `${service.name} - ${currentProject?.name ?? projectSlug}`
@@ -153,7 +158,7 @@ export function ServicePage({
       serviceId={service.id}
       onClose={navigateToProject}
       onTabChange={navigateToTab}
-      onProjectRefresh={loadProject}
+      onProjectRefresh={refreshProjectInBackground}
       onDeleted={navigateToProject}
       pageServices={currentProject.services}
       onServiceSelect={navigateToService}
