@@ -34,27 +34,7 @@ function todoToneClass(tone: SetupTodo["tone"]) {
   return "border-[#4FB8B2]/35 bg-[#4FB8B2]/10 text-[#9af4ee]";
 }
 
-function SetupTodoSkeleton() {
-  return (
-    <section className="border border-zinc-800 bg-zinc-950/55">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="p-4">
-          <div className="h-3 w-28 animate-pulse bg-zinc-800" />
-          <div className="mt-3 h-4 w-56 animate-pulse bg-zinc-800" />
-        </div>
-        <div className="mr-4 h-7 w-24 animate-pulse bg-zinc-800" />
-      </div>
-      <div className="border-t border-zinc-800">
-        <div className="h-16 animate-pulse border-b border-zinc-800 bg-zinc-900/45" />
-        <div className="h-16 animate-pulse border-b border-zinc-800 bg-zinc-900/35" />
-        <div className="h-16 animate-pulse bg-zinc-900/25" />
-      </div>
-    </section>
-  );
-}
-
 export function SetupTodoList({
-  loading,
   domainSettings,
   githubStatus,
   r2Status,
@@ -62,7 +42,6 @@ export function SetupTodoList({
   onOpenSettings,
   onOpenGitHubInstall
 }: {
-  loading: boolean;
   domainSettings: DomainSettingsSummary | null;
   githubStatus: GitHubStatus | null;
   r2Status: R2SettingsStatus | null;
@@ -70,8 +49,6 @@ export function SetupTodoList({
   onOpenSettings: (tab?: SystemSettingsTab) => void;
   onOpenGitHubInstall: () => void;
 }) {
-  if (loading) return <SetupTodoSkeleton />;
-
   const todos: SetupTodo[] = [];
   const dashboardHostname = domainSettings?.settings.controlPlaneHostname ?? "";
   const rootDomain = domainSettings?.settings.rootDomain ?? "";
