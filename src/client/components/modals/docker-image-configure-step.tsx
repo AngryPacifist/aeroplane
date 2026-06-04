@@ -2,6 +2,7 @@ import { ArrowLeft01Icon, CheckmarkCircle02Icon, Delete02Icon, PackageIcon, Plus
 import { FormEvent, useMemo, useState } from "react";
 import { dockerImageRepoFullName, validateDockerImageReference } from "../../../shared/service-source";
 import { AppIcon, FieldLabel, FormInput, shellButton } from "../ui/primitives";
+import { RuntimeModeControl } from "../ui/runtime-mode-control";
 
 type EnvEntry = {
   key: string;
@@ -14,6 +15,7 @@ type DockerImageSubmitPayload = {
   repoUrl: string;
   branch: string;
   dockerImage: string;
+  runtimeMode: "web" | "worker";
   internalPort: number;
   env: EnvEntry[];
 };
@@ -41,12 +43,13 @@ export function DockerImageConfigureStep({
 }) {
   const [image, setImage] = useState("");
   const [name, setName] = useState("");
+  const [runtimeMode, setRuntimeMode] = useState<"web" | "worker">("web");
   const [internalPort, setInternalPort] = useState(8080);
   const [envEntries, setEnvEntries] = useState<EnvEntry[]>([]);
   const [envForm, setEnvForm] = useState<EnvEntry>({ key: "", value: "" });
 
   const imageValidation = useMemo(() => validateDockerImageReference(image), [image]);
-  const canSubmit = imageValidation.ok && name.trim() && internalPort >= 1 && internalPort <= 65535;
+  const canSubmit = imageValidation.ok && name.trim() && (runtimeMode === "worker" || (internalPort >= 1 && internalPort <= 65535));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -58,6 +61,7 @@ export function DockerImageConfigureStep({
       repoUrl: "docker-image",
       branch: "latest",
       dockerImage: imageValidation.image,
+      runtimeMode,
       internalPort,
       env: envEntries
     });
@@ -107,18 +111,24 @@ export function DockerImageConfigureStep({
               <FieldLabel>Service name</FieldLabel>
               <FormInput value={name} onChange={(event) => setName(event.target.value)} placeholder="api" disabled={busy} required />
             </div>
-            <div>
-              <FieldLabel>Internal port</FieldLabel>
-              <FormInput
-                type="number"
-                min={1}
-                max={65535}
-                value={internalPort}
-                onChange={(event) => setInternalPort(Number(event.target.value))}
-                disabled={busy}
-                required
-              />
+            <div className="sm:col-span-2">
+              <FieldLabel>Runtime mode</FieldLabel>
+              <RuntimeModeControl value={runtimeMode} onChange={setRuntimeMode} disabled={busy} />
             </div>
+            {runtimeMode !== "worker" ? (
+              <div>
+                <FieldLabel>Internal port</FieldLabel>
+                <FormInput
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={internalPort}
+                  onChange={(event) => setInternalPort(Number(event.target.value))}
+                  disabled={busy}
+                  required
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3">
