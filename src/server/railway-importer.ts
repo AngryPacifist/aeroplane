@@ -698,6 +698,7 @@ ${serviceInstanceCommandSelection}
       buildCommand: isDatabase || isDockerImage ? null : buildCommand,
       startCommand: isDatabase || isDockerImage ? null : startCommand,
       staticOutput: isDatabase || isDockerImage ? null : staticOutput,
+      runtimeMode: "web",
       internalPort,
       hostPort,
       activePort: null,
