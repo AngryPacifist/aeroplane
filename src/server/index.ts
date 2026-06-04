@@ -94,6 +94,13 @@ import { importRedisDataFromRailway, importRedisDataFromUrl } from "./redis-data
 import { listDatabaseDataImports } from "./database-data-imports.js";
 import { listServiceImportSources } from "./service-import-sources.js";
 import { checkPostgresTlsActive, ensurePostgresTlsAssets, getPostgresTlsInfo } from "./postgres-tls.js";
+import {
+  DOCKER_IMAGE_REPO_URL,
+  dockerImageForService,
+  dockerImageRepoFullName,
+  isDockerImageService,
+  validateDockerImageReference
+} from "../shared/service-source.js";
 
 const app = new Hono();
 
@@ -130,16 +137,32 @@ const optionalRootDir = z
   .transform((value) => (value ? value.replace(/^\/+|\/+$/g, "") : undefined))
   .refine((value) => value === undefined || !value.split("/").includes(".."), { message: "Invalid directory path" });
 const repoSchema = z.string().trim().min(1).refine((value) => {
-  return value.startsWith("https://") || value.startsWith("git@") || value === "database";
+  return value.startsWith("https://") || value.startsWith("git@") || value === "database" || value === DOCKER_IMAGE_REPO_URL;
 }, {
-  message: "Use an HTTPS or SSH Git URL, or database"
+  message: "Use an HTTPS Git URL, SSH Git URL, database, or Docker image source"
 });
 const repoFullNameSchema = z.string().trim().refine((value) => {
-  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) || value.startsWith("database:");
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) || value.startsWith("database:")) return true;
+  if (!value.startsWith("image:")) return false;
+  return validateDockerImageReference(value.slice("image:".length)).ok;
 }, {
-  message: "Choose a GitHub repository or database engine"
+  message: "Choose a GitHub repository, database engine, or Docker image"
 });
 const githubRepoFullNameSchema = z.string().trim().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "Choose a GitHub repository");
+const dockerImageSchema = z.string().trim().optional().superRefine((value, ctx) => {
+  if (!value) return;
+  const validation = validateDockerImageReference(value);
+  if (!validation.ok) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: validation.error
+    });
+  }
+}).transform((value) => {
+  if (!value) return undefined;
+  const validation = validateDockerImageReference(value);
+  return validation.ok ? validation.image : value;
+});
 const hostnameRegex = /^[a-z0-9.-]+\.[a-z]{2,}$|^[a-z0-9-]+\.localhost$/;
 const publicHostnameSchema = z.preprocess((value) => {
   if (typeof value !== "string") return undefined;
@@ -151,6 +174,7 @@ const serviceSettingsSchema = z.object({
   name: z.string().trim().min(1),
   repoFullName: repoFullNameSchema.nullish(),
   repoUrl: repoSchema.optional(),
+  dockerImage: dockerImageSchema,
   branch: z.string().trim().min(1).default("main"),
   rootDir: optionalRootDir,
   githubToken: optionalString,
@@ -160,7 +184,8 @@ const serviceSettingsSchema = z.object({
   staticOutput: optionalString,
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
   databasePublicEnabled: z.boolean().optional().default(true),
-  databasePublicHostname: publicHostnameSchema
+  databasePublicHostname: publicHostnameSchema,
+  postgresLogicalReplicationEnabled: z.boolean().optional().default(false)
 });
 
 const createProjectSchema = z.object({
@@ -291,6 +316,17 @@ const createServiceSchema = serviceSettingsSchema.extend({
   name: z.string().trim().min(1),
   env: z.array(envSchema).optional().default([])
 }).superRefine((value, ctx) => {
+  const repoFullNameImage = value.repoFullName?.startsWith("image:") ? dockerImageForService({ repoFullName: value.repoFullName }) : "";
+  if (value.repoUrl === DOCKER_IMAGE_REPO_URL && !value.dockerImage && !repoFullNameImage) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["dockerImage"],
+      message: "Docker image is required"
+    });
+    return;
+  }
+
+  if (value.dockerImage || repoFullNameImage) return;
   if (value.repoFullName || value.repoUrl) return;
   ctx.addIssue({
     code: z.ZodIssueCode.custom,
@@ -308,6 +344,7 @@ const updateServiceSchema = z.object({
   name: z.string().trim().min(1).optional(),
   repoFullName: repoFullNameSchema.nullish(),
   repoUrl: repoSchema.nullish(),
+  dockerImage: dockerImageSchema,
   branch: z.string().trim().min(1).optional(),
   rootDir: clearableRootDir,
   githubToken: optionalString.nullish(),
@@ -317,7 +354,8 @@ const updateServiceSchema = z.object({
   staticOutput: clearableString,
   internalPort: z.coerce.number().int().min(1).max(65535).optional(),
   databasePublicEnabled: z.boolean().optional(),
-  databasePublicHostname: publicHostnameSchema
+  databasePublicHostname: publicHostnameSchema,
+  postgresLogicalReplicationEnabled: z.boolean().optional()
 });
 const transferServiceSchema = z.object({
   targetProjectId: z.string().trim().min(1)
@@ -469,6 +507,7 @@ function urlForHostname(hostname: string) {
 async function publicService(service: Service) {
   const normalizedService = ensureDatabasePublicDefaults(service) ?? service;
   const isDatabase = isDatabaseService(normalizedService);
+  const isDockerImage = isDockerImageService(normalizedService);
   service = normalizedService;
   const appPort = service.activePort ?? service.hostPort;
   const localUrl = isDatabase ? "" : `http://127.0.0.1:${appPort}`;
@@ -494,12 +533,14 @@ async function publicService(service: Service) {
   const preferredDomainPayload = preferredDomain
     ? { hostname: preferredDomain.hostname, status: preferredDomain.status }
     : null;
-  const framework = await detectFramework(service.repoFullName, service.branch, service.rootDir, {
-    buildCommand: service.buildCommand,
-    installCommand: service.installCommand,
-    serviceName: service.name,
-    startCommand: service.startCommand
-  });
+  const framework = isDockerImage
+    ? null
+    : await detectFramework(service.repoFullName, service.branch, service.rootDir, {
+        buildCommand: service.buildCommand,
+        installCommand: service.installCommand,
+        serviceName: service.name,
+        startCommand: service.startCommand
+      });
 
   return {
     id: service.id,
@@ -508,6 +549,7 @@ async function publicService(service: Service) {
     slug: service.slug,
     repoFullName: service.repoFullName,
     repoUrl: service.repoUrl,
+    dockerImage: isDockerImage ? dockerImageForService(service) : null,
     branch: service.branch,
     rootDir: service.rootDir,
     hasGithubToken: Boolean(service.githubToken),
@@ -519,6 +561,7 @@ async function publicService(service: Service) {
     hostPort: service.hostPort,
     databasePublicEnabled: Boolean(service.databasePublicEnabled),
     databasePublicHostname: service.databasePublicHostname,
+    postgresLogicalReplicationEnabled: Boolean(service.postgresLogicalReplicationEnabled),
     status: liveStatus,
     reachable,
     localUrl,
@@ -562,9 +605,13 @@ async function summarizeProject(project: ProjectGroup, projectServices: Service[
 function createServiceRecord(projectId: string, input: z.infer<typeof createServiceSchema>) {
   const timestamp = nowIso();
   const serviceSlug = createUniqueSlug(input.name, getServiceSlugSet(projectId));
-  const repoFullName = input.repoFullName ?? null;
-  const repoUrl = input.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
+  const inputDockerImage = input.dockerImage ?? (input.repoFullName?.startsWith("image:") ? dockerImageForService({ repoFullName: input.repoFullName }) : "");
+  const repoFullName = inputDockerImage ? dockerImageRepoFullName(inputDockerImage) : input.repoFullName ?? null;
+  const repoUrl = inputDockerImage
+    ? DOCKER_IMAGE_REPO_URL
+    : input.repoUrl ?? (repoFullName?.startsWith("database:") ? "database" : repoFullName ? repoUrlFromFullName(repoFullName) : "");
   const isDatabase = repoUrl === "database" || (repoFullName?.startsWith("database:") ?? false);
+  const dbType = isDatabase ? databaseTypeForService({ repoFullName, repoUrl }) : "";
   const databasePublicHostname = isDatabase
     ? input.databasePublicHostname ?? defaultDatabasePublicHostname(serviceSlug)
     : null;
@@ -589,6 +636,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
     activePort: null,
     databasePublicEnabled: isDatabase,
     databasePublicHostname,
+    postgresLogicalReplicationEnabled: isDatabase && isPostgresFamilyDatabase(dbType) && input.postgresLogicalReplicationEnabled,
     status: "idle",
     lastDeployedAt: null,
     createdAt: timestamp,
@@ -1418,8 +1466,6 @@ app.post("/api/projects/:projectId/services", async (c) => {
     return jsonError(body.error.issues[0]?.message ?? "Invalid service");
   }
 
-  const repoFullName = body.data.repoFullName ?? null;
-  const repoUrl = body.data.repoUrl ?? (repoFullName ? repoUrlFromFullName(repoFullName) : "");
   const service = createServiceRecord(project.id, body.data);
   db.update(projectGroups).set({ updatedAt: nowIso() }).where(eq(projectGroups.id, project.id)).run();
   await writeAndReloadCaddy();
@@ -1872,27 +1918,42 @@ app.patch("/api/services/:serviceId", async (c) => {
     return jsonError(body.error.issues[0]?.message ?? "Invalid update");
   }
 
-  const repoFullName = body.data.repoFullName === undefined ? service.repoFullName : body.data.repoFullName;
-  const repoUrl =
-    body.data.repoUrl === undefined
+  const { dockerImage, ...updateData } = body.data;
+  let repoFullName = updateData.repoFullName === undefined ? service.repoFullName : updateData.repoFullName;
+  let repoUrl =
+    updateData.repoUrl === undefined
       ? repoFullName
-        ? repoUrlFromFullName(repoFullName)
+        ? repoFullName.startsWith("image:")
+          ? DOCKER_IMAGE_REPO_URL
+          : repoFullName.startsWith("database:")
+            ? "database"
+          : repoUrlFromFullName(repoFullName)
         : service.repoUrl
-      : body.data.repoUrl ?? service.repoUrl;
+      : updateData.repoUrl ?? service.repoUrl;
+  if (dockerImage) {
+    repoFullName = dockerImageRepoFullName(dockerImage);
+    repoUrl = DOCKER_IMAGE_REPO_URL;
+  }
   const nextIsDatabase = isDatabaseService({ repoFullName, repoUrl });
+  const nextDatabaseType = nextIsDatabase ? databaseTypeForService({ repoFullName, repoUrl }) : "";
   const databasePublicEnabled = nextIsDatabase;
   const databasePublicHostname = nextIsDatabase
     ? body.data.databasePublicHostname ?? service.databasePublicHostname ?? defaultDatabasePublicHostname(service.slug)
     : null;
+  const postgresLogicalReplicationEnabled =
+    nextIsDatabase && isPostgresFamilyDatabase(nextDatabaseType)
+      ? updateData.postgresLogicalReplicationEnabled ?? service.postgresLogicalReplicationEnabled
+      : false;
 
   db.update(services)
     .set({
-      ...body.data,
+      ...updateData,
       repoFullName,
       repoUrl,
-      githubToken: body.data.githubToken === undefined ? service.githubToken : body.data.githubToken ?? null,
+      githubToken: updateData.githubToken === undefined ? service.githubToken : updateData.githubToken ?? null,
       databasePublicEnabled,
       databasePublicHostname,
+      postgresLogicalReplicationEnabled,
       updatedAt: nowIso()
     })
     .where(eq(services.id, service.id))
