@@ -201,15 +201,16 @@ export function ProjectsPage() {
             </div>
           ) : null}
 
-          <SetupTodoList
-            loading={setupLoading}
-            domainSettings={domainSettings}
-            githubStatus={githubStatus}
-            r2Status={r2Status}
-            tools={tools}
-            onOpenSettings={openSystemSettings}
-            onOpenGitHubInstall={() => setGitHubInstallOpen(true)}
-          />
+          {!setupLoading ? (
+            <SetupTodoList
+              domainSettings={domainSettings}
+              githubStatus={githubStatus}
+              r2Status={r2Status}
+              tools={tools}
+              onOpenSettings={openSystemSettings}
+              onOpenGitHubInstall={() => setGitHubInstallOpen(true)}
+            />
+          ) : null}
 
           {setupLoading ? (
             <ProjectsGridSkeleton />
