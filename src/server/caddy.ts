@@ -9,6 +9,7 @@ import { db } from "./db.js";
 import { domains, services } from "./schema.js";
 import { ensureDefaultDomainsForExistingServices } from "./service-domains.js";
 import { configuredControlPlaneHostname } from "./system-settings.js";
+import { isDatabaseService } from "../shared/service-source.js";
 
 function shellWords(command: string) {
   return command.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
@@ -106,7 +107,7 @@ export function renderCaddyfile() {
   const controlPlaneHostname = currentControlPlaneHostname();
 
   for (const row of domainMappings) {
-    const isDatabase = row.repoUrl === "database" || (row.repoFullName?.startsWith("database:") ?? false);
+    const isDatabase = isDatabaseService(row);
     if (isDatabase) continue;
     if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
 
@@ -128,7 +129,7 @@ ${caddyTlsConfig(row.hostname)}  encode zstd gzip
 
   for (const row of databaseMappings) {
     if (!row.hostname) continue;
-    const isDatabase = row.repoUrl === "database" || (row.repoFullName?.startsWith("database:") ?? false);
+    const isDatabase = isDatabaseService(row);
     const dbType = row.repoFullName?.split(":")[1] || "postgres";
     if (!isDatabase || !isPostgresFamilyDatabase(dbType)) continue;
     if (controlPlaneHostname && row.hostname === controlPlaneHostname) continue;
