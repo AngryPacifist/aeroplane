@@ -98,6 +98,9 @@ const previewLines = [
 
       button.setAttribute("aria-label", "Copied install command");
       button.setAttribute("data-copied", "true");
+      window["posthog"]?.capture?.("install_command_copied", {
+        placement: "hero_command_panel",
+      });
 
       window.setTimeout(() => {
         button.setAttribute("aria-label", "Copy install command");
