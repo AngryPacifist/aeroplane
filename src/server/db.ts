@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS projects (
   active_port INTEGER,
   database_public_enabled INTEGER NOT NULL DEFAULT 0,
   database_public_hostname TEXT,
+  postgres_logical_replication_enabled INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   last_deployed_at TEXT,
   created_at TEXT NOT NULL,
@@ -202,6 +203,10 @@ if (!hasColumn("projects", "database_public_enabled")) {
 
 if (!hasColumn("projects", "database_public_hostname")) {
   sqlite.exec("ALTER TABLE projects ADD COLUMN database_public_hostname TEXT");
+}
+
+if (!hasColumn("projects", "postgres_logical_replication_enabled")) {
+  sqlite.exec("ALTER TABLE projects ADD COLUMN postgres_logical_replication_enabled INTEGER NOT NULL DEFAULT 0");
 }
 
 if (!hasColumn("database_backups", "trigger")) {
