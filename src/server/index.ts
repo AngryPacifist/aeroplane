@@ -185,7 +185,7 @@ const serviceSettingsSchema = z.object({
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
   databasePublicEnabled: z.boolean().optional().default(true),
   databasePublicHostname: publicHostnameSchema,
-  postgresLogicalReplicationEnabled: z.boolean().optional().default(false)
+  postgresLogicalReplicationEnabled: z.boolean().optional().default(true)
 });
 
 const createProjectSchema = z.object({
