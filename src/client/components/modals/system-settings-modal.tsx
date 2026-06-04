@@ -71,11 +71,11 @@ export function SystemSettingsModal({
                 <div className="mt-5 border-t border-zinc-800 pt-5">
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2.5 border border-[#4FB8B2]/30 bg-[#4FB8B2]/10 px-3 py-2.5 text-left font-mono text-xs font-semibold uppercase tracking-wider text-[#7fe3dd] transition hover:bg-[#4FB8B2]/16"
+                    className="flex w-full items-center gap-2.5 border border-[#4FB8B2]/30 bg-[#4FB8B2]/10 px-3 py-2.5 text-left font-mono text-xs font-semibold uppercase leading-none tracking-normal text-[#7fe3dd] transition hover:bg-[#4FB8B2]/16"
                     onClick={() => window.location.assign("/onboarding")}
                   >
-                    <AppIcon icon={Refresh03Icon} size={15} />
-                    Restart onboarding
+                    <AppIcon icon={Refresh03Icon} size={15} className="shrink-0" />
+                    <span className="min-w-0 truncate">Restart onboarding</span>
                   </button>
                 </div>
               </aside>
