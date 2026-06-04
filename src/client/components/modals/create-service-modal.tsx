@@ -49,6 +49,7 @@ import type { ServiceFormPayload } from "../../features/services/service-form-ty
 import { ImportTypeStep } from "./import-type-step";
 import { DatabaseSelectStep } from "./database-select-step";
 import { DatabaseConfigureStep } from "./database-configure-step";
+import { DockerImageConfigureStep } from "./docker-image-configure-step";
 import type { DatabaseType } from "./database-service-options";
 import {
   EnvironmentVariableSuggestions,
@@ -114,8 +115,8 @@ export function CreateServiceModal({
   onClose: () => void;
   onCreate: (payload: ServiceFormPayload) => Promise<void>;
 }) {
-  const [step, setStep] = useState<"type" | "repo" | "directory" | "configure" | "database-select" | "database-configure">("type");
-  const [serviceType, setServiceType] = useState<"git" | "database" | null>(null);
+  const [step, setStep] = useState<"type" | "repo" | "directory" | "configure" | "database-select" | "database-configure" | "docker-image-configure">("type");
+  const [serviceType, setServiceType] = useState<"git" | "database" | "docker-image" | null>(null);
   const [gitSourceMode, setGitSourceMode] = useState<GitSourceMode>("github");
   const [selectedDbType, setSelectedDbType] = useState<DatabaseType>("postgres");
 
@@ -500,6 +501,35 @@ export function CreateServiceModal({
     }
   }
 
+  async function handleDockerImageSubmit(payload: {
+    name: string;
+    repoFullName: string;
+    repoUrl: string;
+    branch: string;
+    dockerImage: string;
+    internalPort: number;
+    env: Array<{ key: string; value: string }>;
+  }) {
+    setBusy(true);
+    setError("");
+    try {
+      await onCreate({
+        name: payload.name,
+        repoFullName: payload.repoFullName,
+        repoUrl: payload.repoUrl,
+        branch: payload.branch,
+        dockerImage: payload.dockerImage,
+        internalPort: payload.internalPort,
+        env: payload.env
+      });
+      onClose();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Could not create Docker image service");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const currentDirectory = form.rootDir || "";
   const isUrlSource = serviceType === "git" && gitSourceMode === "url";
   const gitUrlValid = isGitUrl(form.repoUrl ?? "");
@@ -509,6 +539,8 @@ export function CreateServiceModal({
         { key: "database-select", label: "Database" },
         { key: "database-configure", label: "Configure" }
       ] as const)
+    : serviceType === "docker-image"
+    ? ([{ key: "docker-image-configure", label: "Docker Image" }] as const)
     : isUrlSource
     ? ([
         { key: "repo", label: "Git URL" },
@@ -522,6 +554,8 @@ export function CreateServiceModal({
 
   const stepIndex = serviceType === "database"
     ? step === "database-select" ? 0 : 1
+    : serviceType === "docker-image"
+    ? 0
     : isUrlSource
     ? step === "repo" ? 0 : 1
     : step === "repo" ? 0 : step === "directory" ? 1 : 2;
@@ -576,6 +610,8 @@ export function CreateServiceModal({
       ? CloudServerIcon
       : step === "database-configure"
       ? Settings01Icon
+      : step === "docker-image-configure"
+      ? PackageIcon
       : step === "repo"
       ? GithubIcon
       : step === "directory"
@@ -589,6 +625,8 @@ export function CreateServiceModal({
       ? "Select Database Engine"
       : step === "database-configure"
       ? "Configure Database"
+      : step === "docker-image-configure"
+      ? "Configure Docker Image"
       : step === "repo"
       ? "Import Git Repository"
       : step === "directory"
@@ -602,6 +640,8 @@ export function CreateServiceModal({
       ? step === "database-select"
         ? "Step 1 of 2"
         : "Step 2 of 2"
+      : serviceType === "docker-image"
+      ? "Step 1 of 1"
       : isUrlSource
       ? step === "repo"
         ? "Step 1 of 2"
@@ -677,6 +717,8 @@ export function CreateServiceModal({
             setServiceType(type);
             if (type === "git") {
               setStep("repo");
+            } else if (type === "docker-image") {
+              setStep("docker-image-configure");
             } else {
               setStep("database-select");
             }
@@ -698,6 +740,15 @@ export function CreateServiceModal({
           dbType={selectedDbType}
           onBack={() => setStep("database-select")}
           onSubmit={handleDatabaseSubmit}
+          busy={busy}
+        />
+      ) : step === "docker-image-configure" ? (
+        <DockerImageConfigureStep
+          onBack={() => {
+            setServiceType(null);
+            setStep("type");
+          }}
+          onSubmit={handleDockerImageSubmit}
           busy={busy}
         />
       ) : step === "repo" ? (
