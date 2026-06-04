@@ -55,6 +55,10 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
+function serviceIsDeploying(status: string) {
+  return status === "queued" || status === "building";
+}
+
 export function ProjectPage({ projectSlug }: { projectSlug: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<null | ProjectDetail>(null);
@@ -100,7 +104,9 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
 
   useEffect(() => {
     if (
-      !currentProject?.services.some((service) => service.status === "building")
+      !currentProject?.services.some((service) =>
+        serviceIsDeploying(service.status),
+      )
     )
       return;
     const interval = setInterval(() => {
