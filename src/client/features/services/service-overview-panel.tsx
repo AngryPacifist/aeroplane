@@ -14,6 +14,7 @@ import { AppIcon, FrameworkMark, StatusPill, shellButton } from "../../component
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { formatBuildDuration } from "./service-format";
 import type { ServiceTab } from "./service-tabs";
+import { dockerImageForService, isDockerImageService } from "../../../shared/service-source";
 
 type ServiceOverviewPanelProps = {
   service: Service;
@@ -43,6 +44,7 @@ function displayStatus(status: string) {
 
 function repoLabel(service: Service, isDatabase: boolean, databaseEngine: string) {
   if (isDatabase) return databaseEngine ? `${databaseEngine} database` : "database";
+  if (isDockerImageService(service)) return service.dockerImage || dockerImageForService(service) || "Docker image";
   return service.repoFullName ?? service.repoUrl.replace(/^https?:\/\//, "").replace(/^github\.com\//, "");
 }
 
@@ -87,13 +89,15 @@ function warningItems({
   deployments,
   env,
   domains,
-  isDatabase
+  isDatabase,
+  isDockerImage
 }: {
   service: Service;
   deployments: Deployment[];
   env: EnvVar[];
   domains: Domain[];
   isDatabase: boolean;
+  isDockerImage: boolean;
 }) {
   const warnings: string[] = [];
   const latest = deployments[0];
@@ -102,7 +106,7 @@ function warningItems({
   if (latest?.status === "failed") warnings.push("Latest deployment failed.");
   if (!service.reachable && service.status !== "building" && service.status !== "queued") warnings.push("Runtime is not reachable.");
   if (!isDatabase && domains.some((domain) => domain.status !== "active")) warnings.push("One or more domains still need DNS verification.");
-  if (!isDatabase && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
+  if (!isDatabase && !isDockerImage && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
 
   return warnings;
 }
@@ -156,11 +160,12 @@ export function ServiceOverviewPanel({
   const latestDuration = latestDeployment
     ? formatBuildDuration(latestDeployment.startedAt ?? latestDeployment.createdAt, latestDeployment.finishedAt, nowMs)
     : null;
+  const isDockerImage = isDockerImageService(service);
   const rootDir = service.rootDir || ".";
   const sourceLabel = repoLabel(service, isDatabase, databaseEngine);
-  const sourceMeta = isDatabase ? "Managed database" : service.branch;
+  const sourceMeta = isDatabase ? "Managed database" : isDockerImage ? "Docker image" : service.branch;
   const link = serviceLink(service, isDatabase);
-  const warnings = warningItems({ service, deployments, env, domains, isDatabase });
+  const warnings = warningItems({ service, deployments, env, domains, isDatabase, isDockerImage });
   const linkedSlugs = linkedServiceSlugs(env);
   const linkedServices = pageServices.filter((candidate) => candidate.id !== service.id && linkedSlugs.has(candidate.slug));
 
@@ -171,7 +176,7 @@ export function ServiceOverviewPanel({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-3">
               <div className="grid h-12 w-12 shrink-0 place-items-center border border-zinc-800 bg-zinc-900 p-2">
-                <FrameworkMark framework={service.framework} size={26} fallback={<AppIcon icon={isDatabase ? DatabaseIcon : GithubIcon} size={22} className="text-zinc-300" />} />
+                <FrameworkMark framework={service.framework} size={26} fallback={<AppIcon icon={isDatabase ? DatabaseIcon : isDockerImage ? PackageIcon : GithubIcon} size={22} className="text-zinc-300" />} />
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -229,7 +234,7 @@ export function ServiceOverviewPanel({
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <OverviewStat label="Status" value={latestStatus} meta={latestDeployment.trigger} />
-              <OverviewStat label="Commit" value={shortSha(latestDeployment.commitSha)} meta={latestDeployment.imageTag ?? "image pending"} />
+              <OverviewStat label={isDockerImage ? "Image" : "Commit"} value={isDockerImage ? latestDeployment.imageTag ?? sourceLabel : shortSha(latestDeployment.commitSha)} meta={isDockerImage ? latestDeployment.trigger : latestDeployment.imageTag ?? "image pending"} />
               <OverviewStat label="Duration" value={latestDuration ?? "Unknown"} meta={formatTime(latestDeployment.createdAt)} />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -269,13 +274,21 @@ export function ServiceOverviewPanel({
 
         <section className="border border-zinc-800 bg-zinc-950/45 p-5">
           <SectionHeader icon={Settings01Icon} title="Runtime Config" />
-          <div>
-            <DefinitionRow label="Root directory" value={rootDir} />
-            <DefinitionRow label="Install" value={valueOrAuto(service.installCommand)} />
-            <DefinitionRow label="Build" value={valueOrAuto(service.buildCommand)} />
-            <DefinitionRow label="Start" value={valueOrAuto(service.startCommand)} />
-            <DefinitionRow label="Static output" value={valueOrAuto(service.staticOutput)} />
-          </div>
+          {isDockerImage ? (
+            <div>
+              <DefinitionRow label="Docker image" value={sourceLabel} />
+              <DefinitionRow label="Internal port" value={String(service.internalPort)} />
+              <DefinitionRow label="Host port" value={String(service.hostPort)} />
+            </div>
+          ) : (
+            <div>
+              <DefinitionRow label="Root directory" value={rootDir} />
+              <DefinitionRow label="Install" value={valueOrAuto(service.installCommand)} />
+              <DefinitionRow label="Build" value={valueOrAuto(service.buildCommand)} />
+              <DefinitionRow label="Start" value={valueOrAuto(service.startCommand)} />
+              <DefinitionRow label="Static output" value={valueOrAuto(service.staticOutput)} />
+            </div>
+          )}
         </section>
 
         <section className="border border-zinc-800 bg-zinc-950/45 p-5">
@@ -309,7 +322,7 @@ export function ServiceOverviewPanel({
             {deployments.slice(0, 5).map((deployment) => (
               <div key={deployment.id} className="grid gap-3 py-3 md:grid-cols-[120px_minmax(0,1fr)_120px_110px] md:items-center">
                 <StatusPill status={displayStatus(deployment.status)} />
-                <div className="min-w-0 truncate font-mono text-xs text-zinc-300">{shortSha(deployment.commitSha)}</div>
+                <div className="min-w-0 truncate font-mono text-xs text-zinc-300">{isDockerImage ? deployment.imageTag ?? sourceLabel : shortSha(deployment.commitSha)}</div>
                 <div className="font-mono text-xs text-zinc-500">{deployment.trigger}</div>
                 <div className="font-mono text-xs text-zinc-500">{formatRelativeTime(deployment.createdAt)}</div>
               </div>
