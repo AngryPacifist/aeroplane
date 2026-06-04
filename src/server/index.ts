@@ -101,6 +101,7 @@ import {
   isDockerImageService,
   validateDockerImageReference
 } from "../shared/service-source.js";
+import { isWorkerService, normalizeServiceRuntimeMode, serviceRuntimeModes } from "../shared/service-runtime.js";
 
 const app = new Hono();
 
@@ -169,6 +170,7 @@ const publicHostnameSchema = z.preprocess((value) => {
   const hostname = value.trim().toLowerCase();
   return hostname || undefined;
 }, z.string().regex(hostnameRegex, "Use a valid hostname like db.example.com").optional());
+const serviceRuntimeModeSchema = z.enum(serviceRuntimeModes).default("web");
 
 const serviceSettingsSchema = z.object({
   name: z.string().trim().min(1),
@@ -182,6 +184,7 @@ const serviceSettingsSchema = z.object({
   buildCommand: optionalCommand,
   startCommand: optionalCommand,
   staticOutput: optionalString,
+  runtimeMode: serviceRuntimeModeSchema,
   internalPort: z.coerce.number().int().min(1).max(65535).default(8080),
   databasePublicEnabled: z.boolean().optional().default(true),
   databasePublicHostname: publicHostnameSchema,
@@ -352,6 +355,7 @@ const updateServiceSchema = z.object({
   buildCommand: clearableCommand,
   startCommand: clearableCommand,
   staticOutput: clearableString,
+  runtimeMode: z.enum(serviceRuntimeModes).optional(),
   internalPort: z.coerce.number().int().min(1).max(65535).optional(),
   databasePublicEnabled: z.boolean().optional(),
   databasePublicHostname: publicHostnameSchema,
@@ -499,6 +503,23 @@ function checkPortReachable(port: number, host = "127.0.0.1", timeoutMs = 350) {
   });
 }
 
+function checkContainerRunning(containerName: string) {
+  return new Promise<boolean>((resolve) => {
+    const child = spawn("docker", ["inspect", "--format", "{{.State.Running}}", containerName], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => {
+      resolve(code === 0 && stdout.trim() === "true");
+    });
+  });
+}
+
 function urlForHostname(hostname: string) {
   const isIpv4Address = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
   return `${isIpv4Address ? "http" : "https"}://${hostname}`;
@@ -508,9 +529,10 @@ async function publicService(service: Service) {
   const normalizedService = ensureDatabasePublicDefaults(service) ?? service;
   const isDatabase = isDatabaseService(normalizedService);
   const isDockerImage = isDockerImageService(normalizedService);
+  const isWorker = isWorkerService(normalizedService);
   service = normalizedService;
   const appPort = service.activePort ?? service.hostPort;
-  const localUrl = isDatabase ? "" : `http://127.0.0.1:${appPort}`;
+  const localUrl = isDatabase || isWorker ? "" : `http://127.0.0.1:${appPort}`;
   const latestDeployment = db
     .select({ status: deployments.status })
     .from(deployments)
@@ -519,17 +541,21 @@ async function publicService(service: Service) {
     .limit(1)
     .get();
   const shouldProbe = service.status === "active" || service.status === "queued" || service.status === "building";
-  const reachable = shouldProbe ? await checkPortReachable(appPort) : false;
+  const reachable = shouldProbe
+    ? isWorker
+      ? await checkContainerRunning(containerNameForService(service.id))
+      : await checkPortReachable(appPort)
+    : false;
   const latestDeploymentIsActive = latestDeployment?.status === "queued" || latestDeployment?.status === "building";
   const liveStatus = service.status === "active" && !reachable && !latestDeploymentIsActive ? "crashed" : service.status;
-  const serviceDomains = isDatabase ? [] : db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
+  const serviceDomains = isDatabase || isWorker ? [] : db.select().from(domains).where(eq(domains.serviceId, service.id)).orderBy(asc(domains.createdAt)).all();
   const customDomains = serviceDomains.filter((domain) => !isGeneratedServiceHostname(service.slug, domain.hostname));
   const preferredDomain =
     customDomains.find((domain) => domain.status === "active") ??
     customDomains.find((domain) => Boolean(domain.hostname)) ??
     serviceDomains.find((domain) => domain.status === "active") ??
     serviceDomains.find((domain) => Boolean(domain.hostname));
-  const primaryUrl = isDatabase ? "" : preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
+  const primaryUrl = isDatabase || isWorker ? "" : preferredDomain ? urlForHostname(preferredDomain.hostname) : localUrl;
   const preferredDomainPayload = preferredDomain
     ? { hostname: preferredDomain.hostname, status: preferredDomain.status }
     : null;
@@ -557,6 +583,7 @@ async function publicService(service: Service) {
     buildCommand: service.buildCommand,
     startCommand: service.startCommand,
     staticOutput: service.staticOutput,
+    runtimeMode: normalizeServiceRuntimeMode(service.runtimeMode),
     internalPort: service.internalPort,
     hostPort: service.hostPort,
     databasePublicEnabled: Boolean(service.databasePublicEnabled),
@@ -631,6 +658,7 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
     buildCommand: input.buildCommand ?? null,
     startCommand: input.startCommand ?? null,
     staticOutput: input.staticOutput ?? null,
+    runtimeMode: isDatabase || input.staticOutput ? "web" : input.runtimeMode,
     internalPort: input.internalPort,
     hostPort: allocateHostPort(),
     activePort: null,
@@ -1518,6 +1546,7 @@ app.get("/api/services/:serviceId/overview", async (c) => {
     return jsonError("Service not found", 404);
   }
   const isDatabase = isDatabaseService(service);
+  const isWorker = isWorkerService(service);
   if (isDatabase) {
     syncDatabaseUrlEnvVar(service.id);
   }
@@ -1556,7 +1585,7 @@ app.get("/api/services/:serviceId/overview", async (c) => {
     .all();
 
   // Dynamically check DNS configuration for each public domain in real-time
-  const updatedDomains = isDatabase
+  const updatedDomains = isDatabase || isWorker
     ? []
     : await Promise.all(
         serviceDomains.map(async (d) => {
@@ -1605,7 +1634,7 @@ app.get("/api/services/:serviceId/suggestion-keys", async (c) => {
 
   const suggestions: Array<{ key: string; label: string }> = [];
 
-  const properties = ["hostPort", "activePort", "internalPort", "name", "slug", "status"];
+  const properties = ["hostPort", "activePort", "internalPort", "runtimeMode", "name", "slug", "status"];
   for (const prop of properties) {
     suggestions.push({
       key: prop,
@@ -1944,6 +1973,10 @@ app.patch("/api/services/:serviceId", async (c) => {
     nextIsDatabase && isPostgresFamilyDatabase(nextDatabaseType)
       ? updateData.postgresLogicalReplicationEnabled ?? service.postgresLogicalReplicationEnabled
       : false;
+  const nextStaticOutput = updateData.staticOutput === undefined ? service.staticOutput : updateData.staticOutput;
+  const runtimeMode = nextIsDatabase || nextStaticOutput
+    ? "web"
+    : normalizeServiceRuntimeMode(updateData.runtimeMode ?? service.runtimeMode);
 
   db.update(services)
     .set({
@@ -1951,6 +1984,8 @@ app.patch("/api/services/:serviceId", async (c) => {
       repoFullName,
       repoUrl,
       githubToken: updateData.githubToken === undefined ? service.githubToken : updateData.githubToken ?? null,
+      runtimeMode,
+      ...(runtimeMode === "worker" ? { activePort: null } : {}),
       databasePublicEnabled,
       databasePublicHostname,
       postgresLogicalReplicationEnabled,
@@ -1962,6 +1997,12 @@ app.patch("/api/services/:serviceId", async (c) => {
   syncDatabaseUrlEnvVar(service.id);
 
   const updated = getServiceById(service.id);
+  if (updated && !isDatabaseService(updated) && !isWorkerService(updated)) {
+    ensureDefaultDomainForService(updated);
+  }
+  if (updated && runtimeMode !== normalizeServiceRuntimeMode(service.runtimeMode)) {
+    await writeAndReloadCaddy();
+  }
   return c.json({ service: updated ? await publicService(updated) : null });
 });
 
@@ -2270,6 +2311,9 @@ app.post("/api/services/:serviceId/domains", async (c) => {
   if (!service) {
     return jsonError("Service not found", 404);
   }
+  if (isWorkerService(service)) {
+    return jsonError("Background workers do not accept custom domains");
+  }
 
   const body = domainSchema.safeParse(await c.req.json());
   if (!body.success) {
@@ -2298,6 +2342,9 @@ app.patch("/api/services/:serviceId/domains/:domainId", async (c) => {
   const service = getServiceById(c.req.param("serviceId"));
   if (!service) {
     return jsonError("Service not found", 404);
+  }
+  if (isWorkerService(service)) {
+    return jsonError("Background workers do not accept custom domains");
   }
 
   const body = domainSchema.safeParse(await c.req.json());
