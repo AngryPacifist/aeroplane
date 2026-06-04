@@ -1,5 +1,7 @@
 ---
 import "../styles/global.css";
+import AnalyticsClickTracking from "../components/analytics-click-tracking.astro";
+import PosthogTracking from "../components/posthog-tracking.astro";
 
 interface Props {
   title?: string;
@@ -19,9 +21,11 @@ const {
     <meta name="description" content={description} />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <PosthogTracking />
     <title>{title}</title>
   </head>
   <body>
     <slot />
+    <AnalyticsClickTracking />
   </body>
 </html>
