@@ -41,6 +41,7 @@ import {
 import { Dropdown } from "../ui/dropdown";
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { githubBranchesCache, githubDirectoriesCache, githubReposCache } from "../../lib/github-cache";
+import { compareReposByLastPush, repoLastPushedAt } from "../../lib/github-repos";
 import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
@@ -167,7 +168,7 @@ export function CreateServiceModal({
   const filteredRepos = useMemo(() => {
     return repos
       .filter((repo) => ownerFilter === "all" || repo.fullName.startsWith(`${ownerFilter}/`))
-      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+      .sort(compareReposByLastPush);
   }, [ownerFilter, repos]);
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.fullName === form.repoFullName) ?? null, [repos, form.repoFullName]);
@@ -335,8 +336,8 @@ export function CreateServiceModal({
 
   useEffect(() => {
     if (!owners.length) return;
-    if (ownerFilter !== "all" && owners.includes(ownerFilter)) return;
-    setOwnerFilter(owners[0] ?? "all");
+    if (ownerFilter === "all" || owners.includes(ownerFilter)) return;
+    setOwnerFilter("all");
   }, [ownerFilter, owners]);
 
   useEffect(() => {
@@ -824,11 +825,22 @@ export function CreateServiceModal({
                         onClick={() => setOwnerMenuOpen((current) => !current)}
                         disabled={!owners.length}
                       >
-                        <span className="truncate">{ownerFilter === "all" ? "Loading accounts..." : ownerFilter}</span>
+                        <span className="truncate">{ownerFilter === "all" ? "All accounts" : ownerFilter}</span>
                         <AppIcon icon={ArrowLeft01Icon} size={16} className={ownerMenuOpen ? "rotate-90" : "-rotate-90"} />
                       </button>
                       {ownerMenuOpen ? (
                         <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 max-h-64 overflow-auto border border-zinc-700 bg-zinc-900 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between border-b border-zinc-800 px-3 py-3 text-left text-sm text-zinc-100 hover:bg-zinc-800"
+                            onClick={() => {
+                              setOwnerFilter("all");
+                              setOwnerMenuOpen(false);
+                            }}
+                          >
+                            <span className="truncate">All accounts</span>
+                            {ownerFilter === "all" ? <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#7fe3dd]">Current</span> : null}
+                          </button>
                           {owners.map((owner) => (
                             <button
                               key={owner}
@@ -884,7 +896,7 @@ export function CreateServiceModal({
                                 <div className="truncate text-sm font-medium text-zinc-100">{repo.name}</div>
                                 <div className="truncate font-mono text-[11px] uppercase tracking-[0.16em] text-zinc-400">
                                   {repo.fullName}
-                                  <span className="ml-2">{formatRelativeTime(repo.updatedAt)}</span>
+                                  <span className="ml-2">{formatRelativeTime(repoLastPushedAt(repo))}</span>
                                 </div>
                               </div>
                             </div>
