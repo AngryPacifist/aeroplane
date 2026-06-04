@@ -3,12 +3,14 @@ export function MaintenanceUsageBar({
   value,
   detail,
   percent,
+  percentLabel,
   tone = "teal"
 }: {
   label: string;
   value: string;
   detail?: string;
   percent: number;
+  percentLabel?: string;
   tone?: "teal" | "amber" | "rose" | "zinc";
 }) {
   const clampedPercent = Math.max(0, Math.min(100, percent));
@@ -28,7 +30,7 @@ export function MaintenanceUsageBar({
           <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">{label}</div>
           <div className="mt-2 font-hero text-xl tracking-tight text-zinc-100">{value}</div>
         </div>
-        <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{Math.round(clampedPercent)}%</div>
+        <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{percentLabel ?? `${Math.round(clampedPercent)}%`}</div>
       </div>
       <div className="mt-4 h-2 border border-zinc-800 bg-black/45">
         <div className={`h-full ${color}`} style={{ width: `${clampedPercent}%` }} />
