@@ -46,6 +46,7 @@ import { DirectoryPickerModal } from "./directory-picker";
 import { DirectoryTree } from "./directory-tree";
 import { SourcePickerModal } from "./source-picker";
 import type { ServiceFormPayload } from "../../features/services/service-form-types";
+import { RuntimeModeControl } from "../ui/runtime-mode-control";
 import { ImportTypeStep } from "./import-type-step";
 import { DatabaseSelectStep } from "./database-select-step";
 import { DatabaseConfigureStep } from "./database-configure-step";
@@ -126,6 +127,7 @@ export function CreateServiceModal({
     repoUrl: "",
     branch: "main",
     rootDir: undefined,
+    runtimeMode: "web",
     internalPort: 8080,
     installCommand: "",
     buildCommand: "",
@@ -185,6 +187,7 @@ export function CreateServiceModal({
         repoUrl: "",
         branch: "main",
         rootDir: undefined,
+        runtimeMode: "web",
         internalPort: 8080,
         installCommand: "",
         buildCommand: "",
@@ -459,7 +462,8 @@ export function CreateServiceModal({
         installCommand: form.installCommand || undefined,
         buildCommand: form.buildCommand || undefined,
         startCommand: form.startCommand || undefined,
-        staticOutput: form.staticOutput || undefined,
+        runtimeMode: form.runtimeMode,
+        staticOutput: form.runtimeMode === "worker" ? undefined : form.staticOutput || undefined,
         env: envEntries
       });
       onClose();
@@ -509,6 +513,7 @@ export function CreateServiceModal({
     repoUrl: string;
     branch: string;
     dockerImage: string;
+    runtimeMode: "web" | "worker";
     internalPort: number;
     env: Array<{ key: string; value: string }>;
   }) {
@@ -521,6 +526,7 @@ export function CreateServiceModal({
         repoUrl: payload.repoUrl,
         branch: payload.branch,
         dockerImage: payload.dockerImage,
+        runtimeMode: payload.runtimeMode,
         internalPort: payload.internalPort,
         env: payload.env
       });
@@ -1056,14 +1062,29 @@ export function CreateServiceModal({
                       onChange={(branch) => setForm((current) => ({ ...current, branch }))}
                     />
                   </div>
-                  <div>
-                    <FieldLabel>App port</FieldLabel>
-                    <FormInput type="number" min={1} max={65535} value={form.internalPort} onChange={(event) => setForm({ ...form, internalPort: Number(event.target.value) })} required />
+                  <div className="md:col-span-2">
+                    <FieldLabel>Runtime mode</FieldLabel>
+                    <RuntimeModeControl
+                      value={form.runtimeMode ?? "web"}
+                      onChange={(runtimeMode) => setForm((current) => ({
+                        ...current,
+                        runtimeMode,
+                        staticOutput: runtimeMode === "worker" ? "" : current.staticOutput
+                      }))}
+                    />
                   </div>
-                  <div>
-                    <FieldLabel>Static output</FieldLabel>
-                    <FormInput value={form.staticOutput ?? ""} onChange={(event) => setForm({ ...form, staticOutput: event.target.value })} placeholder="auto" />
-                  </div>
+                  {form.runtimeMode !== "worker" ? (
+                    <>
+                      <div>
+                        <FieldLabel>App port</FieldLabel>
+                        <FormInput type="number" min={1} max={65535} value={form.internalPort} onChange={(event) => setForm({ ...form, internalPort: Number(event.target.value) })} required />
+                      </div>
+                      <div>
+                        <FieldLabel>Static output</FieldLabel>
+                        <FormInput value={form.staticOutput ?? ""} onChange={(event) => setForm({ ...form, staticOutput: event.target.value })} placeholder="auto" />
+                      </div>
+                    </>
+                  ) : null}
                   <div>
                     <FieldLabel>Install command</FieldLabel>
                     <FormInput value={form.installCommand ?? ""} onChange={(event) => setForm({ ...form, installCommand: event.target.value })} placeholder="auto" />
