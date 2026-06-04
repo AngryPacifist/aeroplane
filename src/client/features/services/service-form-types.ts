@@ -10,6 +10,7 @@ export type ServiceFormPayload = {
   buildCommand?: string;
   startCommand?: string;
   staticOutput?: string;
+  runtimeMode?: "web" | "worker";
   databasePublicEnabled?: boolean;
   databasePublicHostname?: string;
   postgresLogicalReplicationEnabled?: boolean;
