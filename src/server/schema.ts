@@ -24,6 +24,7 @@ export const services = sqliteTable("projects", {
   buildCommand: text("build_command"),
   startCommand: text("start_command"),
   staticOutput: text("static_output"),
+  runtimeMode: text("runtime_mode").notNull().default("web"),
   internalPort: integer("internal_port").notNull(),
   hostPort: integer("host_port").notNull(),
   activePort: integer("active_port"),
