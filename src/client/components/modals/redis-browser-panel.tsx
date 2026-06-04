@@ -1,11 +1,13 @@
-import { Add01Icon, Cancel01Icon, CheckmarkCircle02Icon, Delete02Icon, PencilEdit02Icon, Refresh03Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Cancel01Icon, CheckmarkCircle02Icon, DatabaseImportIcon, Delete02Icon, PencilEdit02Icon, Refresh03Icon } from "@hugeicons/core-free-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { api, type DatabaseRow, type DatabaseRowsResponse, type DatabaseRuntimeState, type DatabaseTable } from "../../api";
+import { api, type DatabaseDataImport, type DatabaseRow, type DatabaseRowsResponse, type DatabaseRuntimeState, type DatabaseTable } from "../../api";
 import { Dropdown } from "../ui/dropdown";
 import { AppIcon, FormInput, shellButton } from "../ui/primitives";
 import { DatabaseInsertSheet } from "./database-insert-sheet";
+import { DatabaseImportStatusBanner } from "./database-import-status-banner";
 import { RedisDeleteKeyModal } from "./redis-delete-key-modal";
+import { RedisDataImportModal } from "./redis-data-import-modal";
 import { RedisHashTable } from "./redis-hash-table";
 import { RedisKeyActionsMenu } from "./redis-key-actions-menu";
 import { RedisTtlPopover } from "./redis-ttl-popover";
@@ -382,6 +384,9 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   const [insertError, setInsertError] = useState("");
   const [insertDraft, setInsertDraft] = useState<Record<string, string>>({});
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [dataImports, setDataImports] = useState<DatabaseDataImport[]>([]);
+  const [dismissedDataImportIds, setDismissedDataImportIds] = useState<Set<string>>(new Set());
   const keysRequestId = useRef(0);
   const rowsRequestId = useRef(0);
 
@@ -390,6 +395,11 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
   const selectedType = selectedKeyMeta?.schema ?? (rowsBelongToSelectedKey ? rowsResult?.rows[0]?.type?.toString() : "") ?? "";
   const rows = rowsBelongToSelectedKey ? rowsResult?.rows ?? [] : [];
   const firstRow = rows[0] ?? {};
+  const latestDataImport = dataImports[0] ?? null;
+  const activeDataImport = dataImports.find((dataImport) => (
+    (dataImport.status === "queued" || dataImport.status === "running") && !dismissedDataImportIds.has(dataImport.id)
+  )) ?? null;
+  const visibleDataImport = activeDataImport ?? (latestDataImport && !dismissedDataImportIds.has(latestDataImport.id) ? latestDataImport : null);
 
   const typeOptions = useMemo(() => {
     const types = Array.from(new Set(keys.map((key) => key.schema).filter(Boolean))).sort();
@@ -444,6 +454,15 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
       }
     } finally {
       if (rowsRequestId.current === requestId) setBusy("");
+    }
+  }
+
+  async function loadDataImports() {
+    try {
+      const result = await api.databaseDataImports(serviceId);
+      setDataImports(result.imports);
+    } catch {
+      setDataImports([]);
     }
   }
 
@@ -605,6 +624,17 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
     }
   }
 
+  async function refreshAfterImport() {
+    rowsRequestId.current += 1;
+    setSelectedKey("");
+    setRowsResult(null);
+    await loadDataImports();
+    const refreshed = await loadKeys(selectedDatabase, "");
+    if (refreshed.selected) {
+      await loadRows(refreshed.selected);
+    }
+  }
+
   useEffect(() => {
     keysRequestId.current += 1;
     rowsRequestId.current += 1;
@@ -614,8 +644,23 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
     setRowsResult(null);
     setRuntimeState("ready");
     setMessage("");
+    setImportOpen(false);
+    setDataImports([]);
+    setDismissedDataImportIds(new Set());
     void loadKeys("0", "");
+    void loadDataImports();
   }, [serviceId]);
+
+  useEffect(() => {
+    const activeImport = dataImports.some((dataImport) => dataImport.status === "queued" || dataImport.status === "running");
+    if (!activeImport) return;
+
+    const interval = window.setInterval(() => {
+      void loadDataImports();
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [dataImports, serviceId]);
 
   useEffect(() => {
     if (selectedKey) void loadRows(selectedKey);
@@ -644,6 +689,10 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
         <button type="button" className="inline-flex h-9 w-9 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-300 transition hover:border-zinc-500 hover:text-white" onClick={() => void loadKeys(selectedDatabase)} disabled={busy === "keys"} aria-label="Refresh keys">
           <AppIcon icon={Refresh03Icon} size={16} className={busy === "keys" ? "animate-spin" : ""} />
         </button>
+        <button type="button" className={`${shellButton("secondary")} h-9 !py-0`} onClick={() => setImportOpen(true)} disabled={hasRuntimeNotice || busy === "keys"}>
+          <AppIcon icon={DatabaseImportIcon} size={15} />
+          Import
+        </button>
         <button type="button" className={`${shellButton("primary")} h-9 !py-0`} onClick={openAddKey} disabled={busy === "insert" || hasRuntimeNotice}>
           <AppIcon icon={Add01Icon} size={15} />
           Key
@@ -651,6 +700,12 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
       </div>
 
       {error ? <div className="border border-rose-500/30 bg-rose-950/25 px-4 py-3 text-sm text-rose-200">{error}</div> : null}
+      {visibleDataImport ? (
+        <DatabaseImportStatusBanner
+          dataImport={visibleDataImport}
+          onDismiss={() => setDismissedDataImportIds((current) => new Set(current).add(visibleDataImport.id))}
+        />
+      ) : null}
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="flex min-h-0 flex-col overflow-hidden border border-zinc-800 bg-zinc-950/45">
@@ -777,6 +832,13 @@ export function RedisBrowserPanel({ serviceId }: { serviceId: string }) {
         busy={busy === "delete"}
         onClose={() => setDeleteOpen(false)}
         onConfirm={deleteSelectedKey}
+      />
+
+      <RedisDataImportModal
+        open={importOpen}
+        serviceId={serviceId}
+        onClose={() => setImportOpen(false)}
+        onImported={refreshAfterImport}
       />
     </div>
   );
