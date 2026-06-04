@@ -612,6 +612,9 @@ export function enqueueDeployment(serviceId: string, options: EnqueueOptions) {
   };
 
   db.insert(deployments).values(deployment).run();
+  if (service.status !== "building") {
+    db.update(services).set({ status: "queued", updatedAt: createdAt }).where(eq(services.id, service.id)).run();
+  }
   appendDeploymentLog(deployment.id, `Deployment queued from ${options.trigger}.`);
   return deployment;
 }
@@ -1038,9 +1041,20 @@ export function startDeployWorker() {
 
   workerStarted = true;
   normalizeRunningDeployments();
+  const interruptedDeployments = db
+    .select({ serviceId: deployments.serviceId })
+    .from(deployments)
+    .where(eq(deployments.status, "building"))
+    .all();
   sqlite
     .prepare("UPDATE deployments SET status = 'failed', finished_at = ? WHERE status IN ('building')")
     .run(now());
+  for (const serviceId of new Set(interruptedDeployments.map((deployment) => deployment.serviceId))) {
+    db.update(services)
+      .set({ status: getLastLiveServiceStatus(serviceId), updatedAt: now() })
+      .where(eq(services.id, serviceId))
+      .run();
+  }
   setInterval(() => {
     void tickWorker();
   }, 2000);
