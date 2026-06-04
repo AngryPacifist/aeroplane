@@ -38,6 +38,7 @@ import { DirectoryPickerModal } from "../../components/modals/directory-picker";
 import { SourcePickerModal } from "../../components/modals/source-picker";
 import { TransferServiceModal } from "../../components/modals/transfer-service-modal";
 import { DatabaseServiceSettingsPanel } from "../../components/modals/database-service-settings-panel";
+import { DockerImageServiceSettingsPanel } from "../../components/modals/docker-image-service-settings-panel";
 import { DatabaseBackupsPanel } from "../../components/modals/database-backups-panel";
 import { DatabaseBrowserPanel } from "../../components/modals/database-browser-panel";
 import { DatabaseSqlConsolePanel } from "../../components/modals/database-sql-console-panel";
@@ -52,6 +53,7 @@ import { ServiceOverviewPanel } from "./service-overview-panel";
 import { ServicePageSkeleton } from "./service-page-skeleton";
 import { RedeployRequiredToast } from "./redeploy-required-toast";
 import type { ServiceTab } from "./service-tabs";
+import { dockerImageForService, dockerImageRepoFullName, isDatabaseService, isDockerImageService } from "../../../shared/service-source";
 
 function textOrNull(value: string) {
   const trimmed = value.trim();
@@ -108,6 +110,7 @@ export function ServicePageShell({
     name: "",
     repoFullName: "",
     repoUrl: "",
+    dockerImage: "",
     branch: "",
     rootDir: "",
     installCommand: "",
@@ -116,7 +119,8 @@ export function ServicePageShell({
     staticOutput: "",
     internalPort: 8080,
     databasePublicEnabled: true,
-    databasePublicHostname: ""
+    databasePublicHostname: "",
+    postgresLogicalReplicationEnabled: false
   });
   const [settingsBranches, setSettingsBranches] = useState<string[]>([]);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
@@ -158,6 +162,7 @@ export function ServicePageShell({
           name: result.service.name,
           repoFullName: result.service.repoFullName ?? "",
           repoUrl: result.service.repoUrl,
+          dockerImage: result.service.dockerImage ?? dockerImageForService(result.service),
           branch: result.service.branch,
           rootDir: result.service.rootDir ?? "",
           installCommand: result.service.installCommand ?? "",
@@ -166,7 +171,8 @@ export function ServicePageShell({
           staticOutput: result.service.staticOutput ?? "",
           internalPort: result.service.internalPort,
           databasePublicEnabled: result.service.databasePublicEnabled,
-          databasePublicHostname: result.service.databasePublicHostname ?? ""
+          databasePublicHostname: result.service.databasePublicHostname ?? "",
+          postgresLogicalReplicationEnabled: result.service.postgresLogicalReplicationEnabled
         });
         setError("");
         setOverviewLoading(false);
@@ -244,7 +250,7 @@ export function ServicePageShell({
   }, [selectedTab, serviceId]);
 
   useEffect(() => {
-    if (selectedTab !== "settings" || !settings.repoFullName || settings.repoFullName.startsWith("database:")) return;
+    if (selectedTab !== "settings" || !settings.repoFullName || settings.repoFullName.startsWith("database:") || settings.repoFullName.startsWith("image:")) return;
     let cancelled = false;
 
     void (async () => {
@@ -300,7 +306,7 @@ export function ServicePageShell({
   }, [selectedTab, sourcePickerOpen, sourceQuery]);
 
   useEffect(() => {
-    if (selectedTab !== "settings" || !directoryPickerOpen || !settings.repoFullName || !settings.branch) return;
+    if (selectedTab !== "settings" || isDockerImage || !directoryPickerOpen || !settings.repoFullName || !settings.branch) return;
     if (settingsDirectoryNodes[""]) return;
     void loadSettingsDirectoryLevel("");
   }, [selectedTab, directoryPickerOpen, settings.repoFullName, settings.branch, settingsDirectoryNodes]);
@@ -385,17 +391,19 @@ export function ServicePageShell({
     await doAction("settings", async () => {
       await api.updateService(serviceId, {
         name: settings.name,
-        repoFullName: isDatabase ? settings.repoFullName : (settings.repoFullName.trim() ? settings.repoFullName : null),
-        repoUrl: isDatabase ? undefined : (settings.repoFullName.trim() ? undefined : settings.repoUrl.trim() || undefined),
+        repoFullName: isDatabase ? settings.repoFullName : isDockerImage ? dockerImageRepoFullName(settings.dockerImage) : (settings.repoFullName.trim() ? settings.repoFullName : null),
+        repoUrl: isDatabase ? undefined : isDockerImage ? "docker-image" : (settings.repoFullName.trim() ? undefined : settings.repoUrl.trim() || undefined),
+        dockerImage: isDockerImage ? settings.dockerImage : undefined,
         branch: settings.branch,
-        rootDir: isDatabase ? undefined : textOrNull(settings.rootDir),
-        installCommand: isDatabase ? undefined : textOrNull(settings.installCommand),
-        buildCommand: isDatabase ? undefined : textOrNull(settings.buildCommand),
-        startCommand: isDatabase ? undefined : textOrNull(settings.startCommand),
-        staticOutput: isDatabase ? undefined : textOrNull(settings.staticOutput),
+        rootDir: isDatabase || isDockerImage ? undefined : textOrNull(settings.rootDir),
+        installCommand: isDatabase || isDockerImage ? undefined : textOrNull(settings.installCommand),
+        buildCommand: isDatabase || isDockerImage ? undefined : textOrNull(settings.buildCommand),
+        startCommand: isDatabase || isDockerImage ? undefined : textOrNull(settings.startCommand),
+        staticOutput: isDatabase || isDockerImage ? undefined : textOrNull(settings.staticOutput),
         internalPort: Number(settings.internalPort),
         databasePublicEnabled: isDatabase ? true : undefined,
-        databasePublicHostname: isDatabase ? settings.databasePublicHostname || undefined : undefined
+        databasePublicHostname: isDatabase ? settings.databasePublicHostname || undefined : undefined,
+        postgresLogicalReplicationEnabled: isDatabase ? settings.postgresLogicalReplicationEnabled : undefined
       });
     });
   }
@@ -452,11 +460,13 @@ export function ServicePageShell({
   }
 
   const service = overview?.service;
-  const isDatabase = service?.repoUrl === "database" || (service?.repoFullName?.startsWith("database:") ?? false);
-  const isGitUrlSource = Boolean(service && !isDatabase && !settings.repoFullName && settings.repoUrl);
+  const isDatabase = service ? isDatabaseService(service) : false;
+  const isDockerImage = service ? isDockerImageService(service) : false;
+  const isGitUrlSource = Boolean(service && !isDatabase && !isDockerImage && !settings.repoFullName && settings.repoUrl);
   const databaseEngine = service?.repoFullName?.startsWith("database:")
     ? service.repoFullName.slice("database:".length).toLowerCase()
     : "";
+  const supportsPostgresLogicalReplication = databaseEngine === "postgres" || databaseEngine === "timescale";
   const hasSqlConsole = isDatabase && databaseEngine !== "redis" && databaseEngine !== "mongodb" && databaseEngine !== "mongo";
   const appTabs: Array<[ServiceTab, unknown]> = [
     ["overview", DashboardSquare02Icon],
@@ -617,9 +627,16 @@ export function ServicePageShell({
                         <DatabaseServiceSettingsPanel
                           settings={settings}
                           hostPort={service?.hostPort}
+                          supportsLogicalReplication={supportsPostgresLogicalReplication}
                           onChange={(nextSettings) => setSettings({ ...settings, ...nextSettings })}
                         />
                       </>
+                    ) : isDockerImage ? (
+                      <DockerImageServiceSettingsPanel
+                        settings={settings}
+                        hostPort={service?.hostPort}
+                        onChange={(nextSettings) => setSettings({ ...settings, ...nextSettings })}
+                      />
                     ) : (
                       <>
                         <div className="xl:col-span-2">
