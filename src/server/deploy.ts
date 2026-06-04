@@ -33,6 +33,7 @@ import { deploymentConcurrency } from "./system-settings.js";
 import { buildkitStartHint, ensureBuildkitRunning } from "./buildkit.js";
 import { dockerImageForService, isDockerImageService } from "../shared/service-source.js";
 import { ensurePostgresLogicalReplication } from "./postgres-logical-replication.js";
+import { isWorkerService } from "../shared/service-runtime.js";
 
 type RunOptions = {
   cwd?: string;
@@ -421,6 +422,32 @@ async function probeContainerStartup(port: number, containerName: string, timeou
   }
 
   throw new Error(`TCP/HTTP health probe timed out on port ${port} after ${timeoutMs}ms`);
+}
+
+async function probeWorkerStartup(containerName: string, timeoutMs = 8000) {
+  const startTime = Date.now();
+  let observedRunning = false;
+  while (Date.now() - startTime <= timeoutMs) {
+    const state = await getContainerState(containerName);
+    if (state?.restarting) {
+      const exitText = Number.isFinite(state.exitCode) ? ` with exit code ${state.exitCode}` : "";
+      const errorText = state.error ? `: ${state.error}` : "";
+      throw new Error(`Container entered a restart loop${exitText}${errorText}`);
+    }
+    if (state && !state.running) {
+      const exitText = Number.isFinite(state.exitCode) ? ` with exit code ${state.exitCode}` : "";
+      const errorText = state.error ? `: ${state.error}` : "";
+      throw new Error(`Container exited during startup${exitText}${errorText}`);
+    }
+    if (state?.running) {
+      observedRunning = true;
+    }
+
+    await delay(250);
+  }
+  if (!observedRunning) {
+    throw new Error(`Container did not reach running state after ${timeoutMs}ms`);
+  }
 }
 
 function packageManagerFromPackageJson(sourceDir: string) {
@@ -825,6 +852,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
 
   if (isDockerImageService(service)) {
     const imageName = dockerImageForService(service);
+    const isWorker = isWorkerService(service);
     if (!imageName) {
       db.update(deployments)
         .set({ status: "failed", startedAt, finishedAt: now(), containerName })
@@ -855,12 +883,15 @@ async function runDeployment(deployment: Deployment, service: Service) {
           .where(eq(deployments.id, deployment.id))
           .run();
         db.update(services)
-          .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
+          .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt, ...(isWorker ? { activePort: null } : {}) })
           .where(eq(services.id, service.id))
           .run();
         const caddy = await writeAndReloadCaddy();
         appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
-        appendDeploymentLog(deployment.id, `Dry-run Docker image deployment marked running at ${preferredServiceUrl(service)}.`);
+        appendDeploymentLog(
+          deployment.id,
+          isWorker ? "Dry-run Docker image worker deployment marked running." : `Dry-run Docker image deployment marked running at ${preferredServiceUrl(service)}.`
+        );
         return;
       }
 
@@ -875,6 +906,56 @@ async function runDeployment(deployment: Deployment, service: Service) {
         runBufferedDocker: (args) => runBufferedCommand("docker", args),
         log: (line) => appendDeploymentLog(deployment.id, line)
       });
+
+      if (isWorker) {
+        appendDeploymentLog(deployment.id, `Stopping and removing old worker container ${containerName} if it exists...`);
+        await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => undefined);
+
+        const dockerArgs = [
+          "run",
+          "-d",
+          "--restart",
+          "unless-stopped",
+          "--name",
+          containerName,
+          ...runtimeNetworkArgs(service)
+        ];
+        for (const [key, value] of Object.entries(env)) {
+          dockerArgs.push("--env", `${key}=${value}`);
+        }
+        dockerArgs.push(imageName);
+
+        appendDeploymentLog(deployment.id, `Starting Docker image worker container ${containerName} without a published port...`);
+        await runCommand("docker", dockerArgs, deployment.id, { redact: secrets });
+
+        appendDeploymentLog(deployment.id, "Checking worker process startup...");
+        try {
+          await probeWorkerStartup(containerName);
+          appendDeploymentLog(deployment.id, "Worker process stayed running. Container is healthy.");
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          appendDeploymentLog(deployment.id, `Worker startup check failed: ${errMsg}.`, "stderr");
+          await appendContainerLogs(containerName, deployment.id, secrets);
+          appendDeploymentLog(deployment.id, "Cleaning up failed worker container...", "stderr");
+          await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {});
+          throw new Error(`Worker startup failed: ${errMsg}`);
+        }
+
+        db.update(services).set({ activePort: null }).where(eq(services.id, service.id)).run();
+        const caddy = await writeAndReloadCaddy();
+        appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
+
+        const deployedAt = now();
+        supersedeRunningDeployments(service.id);
+        db.update(deployments).set({ status: "running", finishedAt: deployedAt }).where(eq(deployments.id, deployment.id)).run();
+        db.update(services)
+          .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
+          .where(eq(services.id, service.id))
+          .run();
+
+        appendDeploymentLog(deployment.id, "Docker image worker deployment successfully running.");
+        return;
+      }
 
       const tempPort = await getEphemeralFreePort();
       const tempContainerName = `${containerName}-${deployment.id}`;
@@ -934,7 +1015,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       supersedeRunningDeployments(service.id);
       db.update(deployments).set({ status: "running", finishedAt: deployedAt }).where(eq(deployments.id, deployment.id)).run();
       db.update(services)
-        .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
+        .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt, ...(isWorker ? { activePort: null } : {}) })
         .where(eq(services.id, service.id))
         .run();
 
@@ -983,6 +1064,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
       appendDeploymentLog(deployment.id, "Dry-run mode is enabled. Skipping clone, Railpack build, and Docker run.");
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 800));
       const deployedAt = now();
+      const isWorker = isWorkerService(service);
       supersedeRunningDeployments(service.id);
       db.update(deployments)
         .set({ status: "running", finishedAt: deployedAt, imageTag, containerName })
@@ -994,7 +1076,7 @@ async function runDeployment(deployment: Deployment, service: Service) {
         .run();
       const caddy = await writeAndReloadCaddy();
       appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
-      appendDeploymentLog(deployment.id, `Dry-run deployment marked running at ${preferredServiceUrl(service)}.`);
+      appendDeploymentLog(deployment.id, isWorker ? "Dry-run worker deployment marked running." : `Dry-run deployment marked running at ${preferredServiceUrl(service)}.`);
       return;
     }
 
@@ -1019,12 +1101,13 @@ async function runDeployment(deployment: Deployment, service: Service) {
     const hasCommandOverrides = Boolean(installCommand || buildCommand || startCommand);
     const looksLikeBunProject = packageManager === "bun";
     const isStaticService = Boolean(service.staticOutput?.trim());
-    const buildEnv = railpackBuildEnv(env, runtimePort);
+    const isWorker = isWorkerService(service);
+    const buildEnv = isWorker ? env : railpackBuildEnv(env, runtimePort);
 
     const railpackEnv: Record<string, string> = {
       ...env,
       BUILDKIT_HOST: config.buildkitHost,
-      PORT: String(runtimePort),
+      ...(isWorker ? {} : { PORT: String(runtimePort) }),
       // Railpack/Railway docs currently reference mixed naming for these overrides.
       // Pass both variants so saved service commands actually win over auto-detection.
       RAILPACK_START_CMD: startCommand,
@@ -1096,6 +1179,64 @@ async function runDeployment(deployment: Deployment, service: Service) {
       const caddy = await writeAndReloadCaddy();
       appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
       appendDeploymentLog(deployment.id, `Static site is served at ${preferredServiceUrl(service)}.`);
+      return;
+    }
+
+    if (isWorker) {
+      await ensureProjectRuntimeNetwork({
+        service,
+        containerNameForService,
+        runDocker: (args) => runCommand("docker", args, deployment.id),
+        runBufferedDocker: (args) => runBufferedCommand("docker", args),
+        log: (line) => appendDeploymentLog(deployment.id, line)
+      });
+
+      appendDeploymentLog(deployment.id, `Stopping and removing old worker container ${containerName} if it exists...`);
+      await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => undefined);
+
+      const dockerArgs = [
+        "run",
+        "-d",
+        "--restart",
+        "unless-stopped",
+        "--name",
+        containerName,
+        ...runtimeNetworkArgs(service)
+      ];
+      for (const [key, value] of Object.entries(env)) {
+        dockerArgs.push("--env", `${key}=${value}`);
+      }
+      dockerArgs.push(imageTag);
+
+      appendDeploymentLog(deployment.id, `Starting worker container ${containerName} without a published port...`);
+      await runCommand("docker", dockerArgs, deployment.id, { redact: secrets });
+
+      appendDeploymentLog(deployment.id, "Checking worker process startup...");
+      try {
+        await probeWorkerStartup(containerName);
+        appendDeploymentLog(deployment.id, "Worker process stayed running. Container is healthy.");
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        appendDeploymentLog(deployment.id, `Worker startup check failed: ${errMsg}.`, "stderr");
+        await appendContainerLogs(containerName, deployment.id, secrets);
+        appendDeploymentLog(deployment.id, "Cleaning up failed worker container...", "stderr");
+        await runCommand("docker", ["rm", "-f", containerName], deployment.id).catch(() => {});
+        throw new Error(`Worker startup failed: ${errMsg}`);
+      }
+
+      db.update(services).set({ activePort: null }).where(eq(services.id, service.id)).run();
+      const caddy = await writeAndReloadCaddy();
+      appendDeploymentLog(deployment.id, caddy.ok ? "Caddy config reloaded." : `Caddy reload skipped/failed: ${caddy.detail}`);
+
+      const deployedAt = now();
+      supersedeRunningDeployments(service.id);
+      db.update(deployments).set({ status: "running", finishedAt: deployedAt }).where(eq(deployments.id, deployment.id)).run();
+      db.update(services)
+        .set({ status: "active", lastDeployedAt: deployedAt, updatedAt: deployedAt })
+        .where(eq(services.id, service.id))
+        .run();
+
+      appendDeploymentLog(deployment.id, "Worker deployment successfully running.");
       return;
     }
 
