@@ -478,6 +478,7 @@ export function CreateServiceModal({
     internalPort: number;
     databasePublicEnabled: boolean;
     databasePublicHostname?: string;
+    postgresLogicalReplicationEnabled: boolean;
     env: Array<{ key: string; value: string }>;
   }) {
     setBusy(true);
@@ -491,6 +492,7 @@ export function CreateServiceModal({
         internalPort: payload.internalPort,
         databasePublicEnabled: payload.databasePublicEnabled,
         databasePublicHostname: payload.databasePublicHostname,
+        postgresLogicalReplicationEnabled: payload.postgresLogicalReplicationEnabled,
         env: payload.env
       });
       onClose();
