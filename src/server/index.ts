@@ -90,6 +90,7 @@ import {
 } from "./database-console.js";
 import { createMigrationBundle, importMigrationBundle } from "./migration-bundle.js";
 import { importPostgresDataFromRailway, importPostgresDataFromUrl } from "./postgres-data-import.js";
+import { importRedisDataFromRailway, importRedisDataFromUrl } from "./redis-data-import.js";
 import { listDatabaseDataImports } from "./database-data-imports.js";
 import { listServiceImportSources } from "./service-import-sources.js";
 import { checkPostgresTlsActive, ensurePostgresTlsAssets, getPostgresTlsInfo } from "./postgres-tls.js";
@@ -215,6 +216,9 @@ const backupSettingsSchema = z.object({
 });
 const postgresUrlImportSchema = z.object({
   sourceUrl: z.string().trim().min(1, "Postgres URL is required")
+});
+const redisUrlImportSchema = z.object({
+  sourceUrl: z.string().trim().min(1, "Redis URL is required")
 });
 const railwayDataImportSchema = z.object({
   apiToken: z.string().trim().min(1, "Railway API token is required")
@@ -1828,6 +1832,32 @@ app.post("/api/services/:serviceId/database/import/railway", async (c) => {
     return c.json({ result: await importPostgresDataFromRailway(c.req.param("serviceId"), body.data.apiToken) });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Could not import Railway Postgres data", 400);
+  }
+});
+
+app.post("/api/services/:serviceId/database/import/redis-url", async (c) => {
+  const body = redisUrlImportSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid Redis import request");
+  }
+
+  try {
+    return c.json({ result: await importRedisDataFromUrl(c.req.param("serviceId"), body.data.sourceUrl) });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not import Redis data", 400);
+  }
+});
+
+app.post("/api/services/:serviceId/database/import/redis-railway", async (c) => {
+  const body = railwayDataImportSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid Railway import request");
+  }
+
+  try {
+    return c.json({ result: await importRedisDataFromRailway(c.req.param("serviceId"), body.data.apiToken) });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Could not import Railway Redis data", 400);
   }
 });
 
