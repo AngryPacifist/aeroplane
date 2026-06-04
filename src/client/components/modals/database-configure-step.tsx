@@ -16,6 +16,7 @@ interface DatabaseConfigureStepProps {
     internalPort: number;
     databasePublicEnabled: boolean;
     databasePublicHostname?: string;
+    postgresLogicalReplicationEnabled: boolean;
     env: EnvEntry[];
   }) => Promise<void>;
   busy: boolean;
@@ -112,6 +113,7 @@ export function DatabaseConfigureStep({ dbType, onBack, onSubmit, busy }: Databa
       internalPort: defaultPort,
       databasePublicEnabled: true,
       databasePublicHostname: publicHostname.trim().toLowerCase() || undefined,
+      postgresLogicalReplicationEnabled: isPostgresFamilyDatabase(dbType),
       env: envEntries
     });
   }
