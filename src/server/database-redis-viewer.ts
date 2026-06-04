@@ -15,7 +15,7 @@ type RedisKeyTarget = {
   database: number;
 };
 
-function redisDatabase(value: unknown) {
+export function redisDatabase(value: unknown) {
   const database = Number(value ?? 0);
   if (!Number.isInteger(database) || database < 0 || database > 255) throw new Error("Redis database must be a number between 0 and 255");
   return database;
@@ -98,7 +98,7 @@ async function applyRedisTtl(ctx: DatabaseContext, key: string, values: RowData,
   }
 }
 
-async function runRedis(ctx: DatabaseContext, args: string[], database = 0) {
+export async function runRedis(ctx: DatabaseContext, args: string[], database = 0) {
   const password = ctx.envMap.get("REDIS_PASSWORD") || "";
   const authIsNotConfigured = (text: string) => text.toLowerCase().includes("without any password configured");
   const command = (withPassword: boolean) => [
