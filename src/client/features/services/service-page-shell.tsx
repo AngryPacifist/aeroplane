@@ -67,6 +67,10 @@ const serviceTabLabels: Record<ServiceTab, string> = {
   settings: "Settings"
 };
 
+function deploymentIsPending(status: string) {
+  return status === "queued" || status === "building";
+}
+
 export function ServicePageShell({
   selectedTab,
   serviceId,
@@ -122,8 +126,9 @@ export function ServicePageShell({
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const loadOverview = useCallback(async () => {
-    setOverviewLoading(true);
+  const loadOverview = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? true;
+    if (showLoading) setOverviewLoading(true);
     try {
       const [result, suggs] = await Promise.all([
         api.serviceOverview(serviceId),
@@ -132,7 +137,12 @@ export function ServicePageShell({
       startTransition(() => {
         setOverview(result);
         setSuggestions(suggs.suggestions);
-        setActiveDeploymentId((current) => current ?? result.deployments[0]?.id ?? null);
+        setActiveDeploymentId((current) => {
+          const pendingDeployment = result.deployments.find((deployment) => deploymentIsPending(deployment.status));
+          if (pendingDeployment) return pendingDeployment.id;
+          if (current && result.deployments.some((deployment) => deployment.id === current)) return current;
+          return result.deployments[0]?.id ?? null;
+        });
         setSettings({
           name: result.service.name,
           repoFullName: result.service.repoFullName ?? "",
@@ -163,11 +173,11 @@ export function ServicePageShell({
   }, [loadOverview, serviceId]);
 
   useEffect(() => {
-    const hasActiveDeployment = overview?.deployments.some((deployment) => deployment.status === "queued" || deployment.status === "building");
-    if (!hasActiveDeployment && overview?.service.status !== "building") return;
+    const hasActiveDeployment = overview?.deployments.some((deployment) => deploymentIsPending(deployment.status));
+    if (!hasActiveDeployment && !deploymentIsPending(overview?.service.status ?? "")) return;
 
     const interval = setInterval(() => {
-      void loadOverview();
+      void loadOverview({ showLoading: false });
       void onProjectRefresh();
     }, 2000);
 
@@ -180,7 +190,7 @@ export function ServicePageShell({
   );
 
   useEffect(() => {
-    if (!activeDeployment || (activeDeployment.status !== "queued" && activeDeployment.status !== "building")) return;
+    if (!activeDeployment || !deploymentIsPending(activeDeployment.status)) return;
 
     const interval = setInterval(() => {
       setNowMs(Date.now());
@@ -295,7 +305,7 @@ export function ServicePageShell({
     setError("");
     try {
       await action();
-      await loadOverview();
+      await loadOverview({ showLoading: false });
       await onProjectRefresh();
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Something went wrong");
@@ -377,7 +387,7 @@ export function ServicePageShell({
   }
 
   async function abortActiveDeployment() {
-    if (!activeDeployment || (activeDeployment.status !== "queued" && activeDeployment.status !== "building")) return;
+    if (!activeDeployment || !deploymentIsPending(activeDeployment.status)) return;
 
     await doAction("abort", async () => {
       await api.abortDeployment(activeDeployment.id);
@@ -435,7 +445,7 @@ export function ServicePageShell({
   const env = overview?.env ?? [];
   const domains = overview?.domains ?? [];
   const activeDeploymentDuration =
-    activeDeployment && (activeDeployment.status === "queued" || activeDeployment.status === "building")
+    activeDeployment && deploymentIsPending(activeDeployment.status)
       ? formatBuildDuration(activeDeployment.startedAt ?? activeDeployment.createdAt, activeDeployment.finishedAt, nowMs)
       : null;
   const shellClass = "relative isolate h-dvh overflow-hidden bg-zinc-950 text-zinc-100";
