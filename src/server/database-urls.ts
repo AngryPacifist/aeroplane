@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
 import type { Service } from "./schema.js";
+import { isDatabaseService as isDatabaseServiceSource } from "../shared/service-source.js";
 
 type DatabaseServiceShape = Pick<Service, "repoUrl" | "repoFullName">;
 
@@ -13,7 +14,7 @@ type DatabaseUrlOptions = {
 };
 
 export function isDatabaseService(service: DatabaseServiceShape) {
-  return service.repoUrl === "database" || (service.repoFullName?.startsWith("database:") ?? false);
+  return isDatabaseServiceSource(service);
 }
 
 export function databaseTypeForService(service: DatabaseServiceShape) {
