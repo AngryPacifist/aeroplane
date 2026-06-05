@@ -1,7 +1,8 @@
-import { CloudUploadIcon, DatabaseExportIcon, GithubIcon, Globe02Icon, HardDriveIcon, Queue02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { ApiIcon, CloudUploadIcon, DatabaseExportIcon, GithubIcon, Globe02Icon, HardDriveIcon, Queue02Icon, Refresh03Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { AppIcon, SectionTitle, shellButton, surfaceClass } from "../ui/primitives";
 import { ControlPlaneDomainSettingsPanel } from "./control-plane-domain-settings-panel";
 import { DeploymentSettingsPanel } from "./deployment-settings-panel";
+import { DnsManagementPanel } from "./dns-management-panel";
 import { GitHubSettingsPanel } from "./github-settings-panel";
 import { MaintenanceSettingsPanel } from "./maintenance-settings-panel";
 import { MigrationSettingsPanel } from "./migration-settings-panel";
@@ -12,6 +13,7 @@ import { UpdatesSettingsPanel } from "./updates-settings-panel";
 
 const settingsTabs: Array<{ id: SystemSettingsTab; label: string; icon: unknown }> = [
   { id: "root-domain", label: "Domains", icon: Globe02Icon },
+  { id: "dns", label: "DNS", icon: ApiIcon },
   { id: "github", label: "GitHub", icon: GithubIcon },
   { id: "storage", label: "Storage", icon: CloudUploadIcon },
   { id: "migration", label: "Migration", icon: DatabaseExportIcon },
@@ -87,6 +89,7 @@ export function SystemSettingsModal({
                     <RootDomainSettingsPanel open={open} />
                   </div>
                 ) : null}
+                {activeTab === "dns" ? <DnsManagementPanel /> : null}
                 {activeTab === "github" ? <GitHubSettingsPanel open={open} /> : null}
                 {activeTab === "storage" ? <R2StorageSettingsPanel open={open} /> : null}
                 {activeTab === "migration" ? <MigrationSettingsPanel /> : null}
