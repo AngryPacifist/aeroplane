@@ -504,7 +504,7 @@ export function ServicePageShell({
   const shellClass = "relative isolate h-dvh overflow-hidden bg-zinc-950 text-zinc-100";
   const viewportClass = "relative z-10 mx-auto flex h-full w-full max-w-7xl flex-col px-5 py-10 sm:px-6 lg:px-10";
   const panelClass = "flex min-h-0 w-full flex-1 flex-col";
-  const tabButtonClass = (tab: ServiceTab) => `${chipClass(selectedTab === tab)} !py-1`;
+  const tabButtonClass = (tab: ServiceTab) => `${chipClass(selectedTab === tab)} relative !py-1`;
   const tabUsesContainedScroll = selectedTab === "deployments" || selectedTab === "logs" || selectedTab === "data" || selectedTab === "sql" || selectedTab === "backups";
   const contentClass = `mt-6 min-h-0 flex-1 ${tabUsesContainedScroll ? "overflow-hidden" : "overflow-y-auto"}`;
 
@@ -548,9 +548,9 @@ export function ServicePageShell({
                   <AppIcon icon={icon} size={15} />
                   <span>{serviceTabLabels[tab]}</span>
                   {tab === "deployments" && hasPendingDeployment ? (
-                    <span className="inline-flex items-center gap-1 border border-amber-400/35 bg-amber-400/10 px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />
-                      Deploying
+                    <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-300 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]">
+                      <span className="absolute inset-0 animate-ping rounded-full bg-amber-300/70" />
+                      <span className="sr-only">Deployment in progress</span>
                     </span>
                   ) : null}
                 </button>
