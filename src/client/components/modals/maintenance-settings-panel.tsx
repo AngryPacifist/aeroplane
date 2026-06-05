@@ -62,7 +62,7 @@ export function MaintenanceSettingsPanel({ open }: { open: boolean }) {
             <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">Maintenance</div>
             <h3 className="mt-2 font-hero text-2xl tracking-tight text-zinc-100">Host health and cleanup</h3>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
-              Watch disk pressure, Docker growth, logs, and Aeroplane build artifacts before they take the VPS down.
+              Watch disk pressure, Docker growth, logs, and Aeroplane build artifacts before they take the server down.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
