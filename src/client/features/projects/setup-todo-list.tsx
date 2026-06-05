@@ -69,7 +69,7 @@ export function SetupTodoList({
       key: "dashboard-dns",
       icon: Globe02Icon,
       title: "Finish dashboard DNS",
-      detail: `${dashboardHostname} is saved, but DNS has not resolved to this VPS yet.`,
+      detail: `${dashboardHostname} is saved, but DNS has not resolved to this server yet.`,
       tone: "amber",
       actionLabel: "View DNS",
       onAction: () => onOpenSettings("root-domain")
