@@ -191,13 +191,13 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
 
       {info?.installType === "image" ? (
         <section className="border border-zinc-800 bg-zinc-950/45 p-5">
-          <h4 className="font-hero text-base tracking-tight text-zinc-100">{info.canApplyUpdate ? "Docker image updates" : "Update from the VPS"}</h4>
+          <h4 className="font-hero text-base tracking-tight text-zinc-100">{info.canApplyUpdate ? "Docker image updates" : "Update from the server"}</h4>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-400">
             {!info.currentCommit
               ? "This image was built without commit metadata, so Aeroplane cannot compare it with GitHub yet. Publish the image with AEROPLANE_COMMIT_SHA to enable one-click updates."
               : info.canApplyUpdate
                 ? "Aeroplane will pull the latest GHCR image through a short-lived updater container, then replace the running app container."
-                : "This container does not include a git checkout, and one-click image updates are not configured for this install. Publish a new GHCR image, then run this on the VPS."}
+                : "This container does not include a git checkout, and one-click image updates are not configured for this install. Publish a new GHCR image, then run this on the server."}
           </p>
           {!info.canApplyUpdate || info.status === "unknown" ? (
             <pre className="mt-4 overflow-x-auto border border-zinc-800 bg-black/35 px-4 py-3 font-mono text-[11px] leading-relaxed text-zinc-300">
