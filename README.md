@@ -51,7 +51,7 @@ curl -fsSL https://get.aeroplane.run | \
 Common options:
 
 - `AEROPLANE_HOME`: install directory, default `/opt/aeroplane`
-- `AEROPLANE_REPO_URL`: Git repository to clone, default `https://github.com/akinloluwami/aeroplane.git`
+- `AEROPLANE_REPO_URL`: Git repository to clone, default `https://github.com/xt42io/aeroplane.git`
 - `AEROPLANE_REPO_BRANCH`: Git branch to install and update from, default `main`
 - `AEROPLANE_PUBLIC_URL`: public URL written to `PUBLIC_URL`
 - `AEROPLANE_PORT`: control-plane port, default `4310`
