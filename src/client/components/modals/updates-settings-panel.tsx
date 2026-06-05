@@ -167,7 +167,7 @@ export function UpdatesSettingsPanel({ open }: { open: boolean }) {
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <div className="border border-zinc-800 bg-zinc-900/50 p-3">
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">Repository</div>
-            <div className="mt-2 truncate font-mono text-xs text-zinc-200">{info?.repo ?? "akinloluwami/aeroplane"}</div>
+            <div className="mt-2 truncate font-mono text-xs text-zinc-200">{info?.repo ?? "xt42io/aeroplane"}</div>
           </div>
           <div className="border border-zinc-800 bg-zinc-900/50 p-3">
             <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-600">Installed</div>
