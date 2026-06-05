@@ -52,7 +52,8 @@ import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenan
 import { writeAndReloadCaddy } from "./caddy.js";
 import { databaseConnectionEnvSuggestionsForProject, databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
-import { configuredControlPlaneHostname, getSystemSettings, normalizeDeploymentConcurrency, publicR2Settings, saveSystemSettings } from "./system-settings.js";
+import { configuredControlPlaneHostname, getSystemSettings, normalizeDeploymentConcurrency, publicDnsSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
+import { applyDnsProviderARecord, dnsProviderName, dnsProviderSettings } from "./dns-providers.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
 import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices, isGeneratedServiceHostname } from "./service-domains.js";
 import { normalizeRootDomain } from "./root-domain.js";
@@ -263,6 +264,24 @@ const r2ConnectionSchema = z.object({
   accessKeyId: z.string().trim().min(1),
   secretAccessKey: z.string().min(1).optional(),
   createBucket: z.boolean().optional().default(true)
+});
+const dnsProviderIdSchema = z.enum(["cloudflare", "namecheap", "spaceship"]);
+const cloudflareDnsConnectionSchema = z.object({
+  apiToken: z.string().optional().default(""),
+  accountEmail: z.string().trim().optional().default(""),
+  zoneId: z.string().trim().optional().default("")
+});
+const namecheapDnsConnectionSchema = z.object({
+  apiUser: z.string().trim().optional().default(""),
+  apiKey: z.string().optional().default(""),
+  clientIp: z.string().trim().optional().default("")
+});
+const spaceshipDnsConnectionSchema = z.object({
+  apiKey: z.string().optional().default(""),
+  apiSecret: z.string().optional().default("")
+});
+const dnsRecordApplySchema = z.object({
+  providerId: dnsProviderIdSchema
 });
 const githubSettingsSchema = z.object({
   githubAccessToken: z.string().optional().default(""),
@@ -933,6 +952,12 @@ function resolveMaskedSecret(input: string, existing: string) {
   return value;
 }
 
+function resolveOptionalMaskedSecret(input: string, existing = "") {
+  const value = input.trim();
+  if (!value) return existing;
+  return resolveMaskedSecret(value, existing);
+}
+
 function onboardingSettingsError(error: unknown) {
   return error instanceof Error ? error.message : "Could not apply onboarding settings";
 }
@@ -1272,6 +1297,120 @@ app.delete("/api/system/r2", (c) => {
   const nextSettings = { ...settings, r2: null };
   saveSystemSettings(nextSettings);
   return c.json({ ok: true, r2: publicR2Settings(nextSettings) });
+});
+
+app.get("/api/system/dns", (c) => c.json({ dns: publicDnsSettings() }));
+
+app.post("/api/system/dns/:provider", async (c) => {
+  if (!hasSecretKey()) {
+    return jsonError("AEROPLANE_SECRET_KEY is required before saving DNS provider credentials", 409);
+  }
+
+  const provider = dnsProviderIdSchema.safeParse(c.req.param("provider"));
+  if (!provider.success) {
+    return jsonError("Unsupported DNS provider", 404);
+  }
+
+  const existing = getSystemSettings();
+  const timestamp = nowIso();
+
+  if (provider.data === "cloudflare") {
+    const body = cloudflareDnsConnectionSchema.safeParse(await c.req.json());
+    if (!body.success) {
+      return jsonError(body.error.issues[0]?.message ?? "Invalid Cloudflare DNS settings");
+    }
+
+    const previous = existing.dns?.cloudflare;
+    const apiToken = resolveOptionalMaskedSecret(body.data.apiToken, previous?.apiToken ?? "");
+    if (!apiToken) return jsonError("Cloudflare API token is required");
+
+    const dns = {
+      ...(existing.dns ?? {}),
+      cloudflare: {
+        provider: "cloudflare" as const,
+        apiToken,
+        accountEmail: body.data.accountEmail,
+        zoneId: body.data.zoneId,
+        connectedAt: previous?.connectedAt ?? timestamp,
+        updatedAt: timestamp
+      }
+    };
+    const nextSettings = { ...existing, dns };
+    saveSystemSettings(nextSettings);
+    return c.json({ ok: true, dns: publicDnsSettings(nextSettings) });
+  }
+
+  if (provider.data === "namecheap") {
+    const body = namecheapDnsConnectionSchema.safeParse(await c.req.json());
+    if (!body.success) {
+      return jsonError(body.error.issues[0]?.message ?? "Invalid Namecheap DNS settings");
+    }
+
+    const previous = existing.dns?.namecheap;
+    const apiKey = resolveOptionalMaskedSecret(body.data.apiKey, previous?.apiKey ?? "");
+    if (!body.data.apiUser) return jsonError("Namecheap API user is required");
+    if (!apiKey) return jsonError("Namecheap API key is required");
+
+    const dns = {
+      ...(existing.dns ?? {}),
+      namecheap: {
+        provider: "namecheap" as const,
+        apiUser: body.data.apiUser,
+        apiKey,
+        clientIp: body.data.clientIp,
+        connectedAt: previous?.connectedAt ?? timestamp,
+        updatedAt: timestamp
+      }
+    };
+    const nextSettings = { ...existing, dns };
+    saveSystemSettings(nextSettings);
+    return c.json({ ok: true, dns: publicDnsSettings(nextSettings) });
+  }
+
+  const body = spaceshipDnsConnectionSchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid Spaceship DNS settings");
+  }
+
+  const previous = existing.dns?.spaceship;
+  const apiKey = resolveOptionalMaskedSecret(body.data.apiKey, previous?.apiKey ?? "");
+  const apiSecret = resolveOptionalMaskedSecret(body.data.apiSecret, previous?.apiSecret ?? "");
+  if (!apiKey) return jsonError("Spaceship API key is required");
+  if (!apiSecret) return jsonError("Spaceship API secret is required");
+
+  const dns = {
+    ...(existing.dns ?? {}),
+    spaceship: {
+      provider: "spaceship" as const,
+      apiKey,
+      apiSecret,
+      connectedAt: previous?.connectedAt ?? timestamp,
+      updatedAt: timestamp
+    }
+  };
+  const nextSettings = { ...existing, dns };
+  saveSystemSettings(nextSettings);
+  return c.json({ ok: true, dns: publicDnsSettings(nextSettings) });
+});
+
+app.delete("/api/system/dns/:provider", (c) => {
+  const provider = dnsProviderIdSchema.safeParse(c.req.param("provider"));
+  if (!provider.success) {
+    return jsonError("Unsupported DNS provider", 404);
+  }
+
+  const settings = getSystemSettings();
+  const dns = { ...(settings.dns ?? {}) };
+  if (provider.data === "cloudflare") delete dns.cloudflare;
+  if (provider.data === "namecheap") delete dns.namecheap;
+  if (provider.data === "spaceship") delete dns.spaceship;
+
+  const nextSettings = {
+    ...settings,
+    dns: Object.keys(dns).length > 0 ? dns : null
+  };
+  saveSystemSettings(nextSettings);
+  return c.json({ ok: true, dns: publicDnsSettings(nextSettings) });
 });
 
 app.get("/api/system/github", async (c) => {
@@ -2363,6 +2502,59 @@ app.patch("/api/services/:serviceId/domains/:domainId", async (c) => {
 
   const caddy = await writeAndReloadCaddy();
   return c.json({ ok: true, caddy });
+});
+
+app.post("/api/services/:serviceId/domains/:domainId/dns-records", async (c) => {
+  const service = getServiceById(c.req.param("serviceId"));
+  if (!service) {
+    return jsonError("Service not found", 404);
+  }
+  if (isWorkerService(service)) {
+    return jsonError("Background workers do not accept custom domains");
+  }
+
+  const body = dnsRecordApplySchema.safeParse(await c.req.json());
+  if (!body.success) {
+    return jsonError(body.error.issues[0]?.message ?? "Invalid DNS provider");
+  }
+
+  const domain = db
+    .select()
+    .from(domains)
+    .where(and(eq(domains.id, c.req.param("domainId")), eq(domains.serviceId, service.id)))
+    .get();
+  if (!domain) {
+    return jsonError("Domain not found", 404);
+  }
+
+  const settings = getSystemSettings();
+  const providerSettings = dnsProviderSettings(settings.dns, body.data.providerId);
+  if (!providerSettings) {
+    return jsonError(`${dnsProviderName(body.data.providerId)} is not connected in system settings.`, 409);
+  }
+
+  try {
+    const result = await applyDnsProviderARecord(body.data.providerId, providerSettings, {
+      hostname: domain.hostname,
+      targetIp: cachedPublicIp,
+      publicIp: cachedPublicIp
+    });
+    const status = await checkDomainDns(domain.hostname, cachedPublicIp);
+    const updatedAt = nowIso();
+    db.update(domains).set({ status, updatedAt }).where(eq(domains.id, domain.id)).run();
+
+    return c.json({
+      ok: true,
+      result,
+      domain: {
+        ...domain,
+        status,
+        updatedAt
+      }
+    });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : `Could not update ${dnsProviderName(body.data.providerId)} DNS record`, 400);
+  }
 });
 
 app.post("/api/github/app/webhook", async (c) => {
