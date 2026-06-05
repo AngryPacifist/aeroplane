@@ -57,7 +57,7 @@ export function MigrationImportModal({
   }
 
   return (
-    <ModalShell open={open} onClose={onClose} icon={DatabaseExportIcon} title="Import Aeroplane" meta="Restore an encrypted bundle from another VPS." width="max-w-3xl">
+    <ModalShell open={open} onClose={onClose} icon={DatabaseExportIcon} title="Import Aeroplane" meta="Restore an encrypted bundle from another server." width="max-w-3xl">
       <form onSubmit={importBundle} className="grid gap-5">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)]">
           <div>
