@@ -1,0 +1,85 @@
+---
+title: Aeroplane Docs
+description: Install Aeroplane, connect your server, and run apps and databases from a self-hosted control plane.
+template: splash
+hero:
+  title: Aeroplane Docs
+  tagline: Install the control plane, wire DNS, GitHub, R2, migrations, databases, and concurrent deployments from your own server.
+  actions:
+    - text: Start install
+      link: /docs/getting-started/install/
+      icon: right-arrow
+    - text: Migrate from Railway
+      link: /docs/migration/railway-import/
+      variant: secondary
+---
+
+import { Aside, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<Aside type="tip" title="Start with a fresh server">
+  Aeroplane is designed to own the deployment stack on a clean Ubuntu or Debian server. Have DNS, GitHub, and backup storage decisions ready before onboarding if you want generated service URLs, push deploys, and off-server backups on day one.
+</Aside>
+
+## Choose Your Path
+
+<CardGrid>
+  <LinkCard
+    title="Install Aeroplane"
+    href="/docs/getting-started/install/"
+    description="Run the installer, see what gets created under /opt/aeroplane, and learn the first host commands to keep nearby."
+  />
+  <LinkCard
+    title="Finish browser onboarding"
+    href="/docs/getting-started/onboarding/"
+    description="Create the owner account, set domains, connect GitHub, choose R2 backups, or restore from a migration bundle."
+  />
+  <LinkCard
+    title="Deploy services"
+    href="/docs/deployments/source-services/"
+    description="Run GitHub repos, direct Git URLs, Docker images, web apps, workers, and static output."
+  />
+  <LinkCard
+    title="Migrate from Railway"
+    href="/docs/migration/railway-import/"
+    description="Import Railway projects, recreate services, map variables, deploy databases first, and pull Postgres or Redis data."
+  />
+  <LinkCard
+    title="Back up databases"
+    href="/docs/storage-and-backups/database-backups/"
+    description="Use disk, R2, or both; schedule daily, weekly, and monthly backups; restore or download when needed."
+  />
+  <LinkCard
+    title="Tune deployment concurrency"
+    href="/docs/deployments/deployment-lifecycle/"
+    description="Understand queued, building, running, aborted, and superseded deployments, plus the global concurrency limit."
+  />
+  <LinkCard
+    title="Open the source"
+    href="https://github.com/xt42io/aeroplane"
+    description="Review the application code, installer, Docker setup, and server runtime that power Aeroplane."
+  />
+</CardGrid>
+
+## Before You Install
+
+- Use a server you control, preferably a fresh Ubuntu or Debian host.
+- Keep ports `80` and `443` available for Caddy.
+- Decide the dashboard hostname, for example `pilot.example.com`.
+- Decide the wildcard service root, for example `*.pilot.example.com`.
+- Create a GitHub App when you want repository-based deployments and push webhooks.
+- Create a Cloudflare R2 bucket or token when you want off-server database backups.
+- Export a `.aeroplane` bundle first if you are moving from another Aeroplane instance.
+
+## Common Sequences
+
+For a new server, read [Install Aeroplane](/docs/getting-started/install/) first, then [Browser Onboarding](/docs/getting-started/onboarding/), then [First Project](/docs/getting-started/first-project/).
+
+For a first app, start with [Source Services](/docs/deployments/source-services/), then wire its hostname with [Domains](/docs/operations/domains/).
+
+For a Railway move, start with [Railway Import](/docs/migration/railway-import/), then use [Database Data Imports](/docs/databases/data-imports/) for Postgres and Redis follow-up imports.
+
+For resilience, connect [R2 Storage](/docs/storage-and-backups/r2-storage/), choose [Database Backups](/docs/storage-and-backups/database-backups/), and review [Restore and Download](/docs/storage-and-backups/restore-and-download/).
+
+## What Aeroplane Manages
+
+Aeroplane runs a self-hosted control plane on your server. It coordinates GitHub-connected app services, direct Git URL services, prebuilt Docker images, Railpack and BuildKit builds, Docker workloads, Caddy routes, generated service domains, custom domains, environment variables, deployment logs, runtime logs, database access, database backups, Railway imports, encrypted migration bundles, R2 storage, DNS provider automation, system maintenance, updates, and deployment concurrency.
