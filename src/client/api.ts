@@ -159,6 +159,34 @@ export type R2SettingsStatus = {
   updatedAt: null | string;
 };
 
+export type DnsProviderId = "cloudflare" | "namecheap" | "spaceship";
+
+export type DnsProviderStatus = {
+  id: DnsProviderId;
+  name: string;
+  connected: boolean;
+  values: Record<string, string>;
+  secretSuffixes: Record<string, string>;
+  keySuffix: string;
+  connectedAt: null | string;
+  updatedAt: null | string;
+};
+
+export type DnsSettingsStatus = {
+  providers: DnsProviderStatus[];
+};
+
+export type DnsRecordApplyResult = {
+  provider: DnsProviderId;
+  providerName: string;
+  action: "created" | "updated";
+  hostname: string;
+  recordType: "A";
+  host: string;
+  zone: string;
+  targetIp: string;
+};
+
 export type SystemSettings = {
   rootDomain: string;
   controlPlaneHostname: string;
@@ -627,6 +655,11 @@ export const api = {
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "DELETE" }),
   updateDomain: (serviceId: string, domainId: string, body: { hostname: string }) =>
     request(`/api/services/${serviceId}/domains/${domainId}`, { method: "PATCH", body: JSON.stringify(body) }),
+  applyDnsRecord: (serviceId: string, domainId: string, providerId: DnsProviderId) =>
+    request<{ ok: boolean; result: DnsRecordApplyResult; domain: Domain }>(`/api/services/${serviceId}/domains/${domainId}/dns-records`, {
+      method: "POST",
+      body: JSON.stringify({ providerId })
+    }),
   databaseTables: (serviceId: string, logicalDatabase?: number) => {
     const suffix = logicalDatabase === undefined ? "" : `?database=${encodeURIComponent(String(logicalDatabase))}`;
     return request<DatabaseTablesResponse>(`/api/services/${serviceId}/database/tables${suffix}`);
@@ -720,6 +753,14 @@ export const api = {
       body: JSON.stringify(body)
     }),
   disconnectR2: () => request<{ ok: boolean; r2: R2SettingsStatus }>("/api/system/r2", { method: "DELETE" }),
+  dnsSettings: () => request<{ dns: DnsSettingsStatus }>("/api/system/dns"),
+  updateDnsProvider: (providerId: DnsProviderId, body: Record<string, string>) =>
+    request<{ ok: boolean; dns: DnsSettingsStatus }>(`/api/system/dns/${providerId}`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  disconnectDnsProvider: (providerId: DnsProviderId) =>
+    request<{ ok: boolean; dns: DnsSettingsStatus }>(`/api/system/dns/${providerId}`, { method: "DELETE" }),
   githubSettings: () => request<GitHubSettingsStatus>("/api/system/github"),
   updateGithubSettings: (body: {
     githubAccessToken?: string;
