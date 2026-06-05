@@ -8,7 +8,7 @@ curl -fsSL https://get.aeroplane.run | sh
 
 Deploy this directory anywhere that can serve `get.aeroplane.run`.
 
-The served installer clones `akinloluwami/aeroplane`, builds it on the VPS, runs the control plane with systemd, and keeps Docker Compose only for BuildKit and Caddy.
+The served installer clones `xt42io/aeroplane`, builds it on the VPS, runs the control plane with systemd, and keeps Docker Compose only for BuildKit and Caddy.
 
 ## Routes
 
