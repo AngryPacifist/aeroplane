@@ -5,7 +5,7 @@ cd /
 
 INSTALL_DIR="${AEROPLANE_HOME:-/opt/aeroplane}"
 APP_DIR="$INSTALL_DIR/source"
-REPO_URL="${AEROPLANE_REPO_URL:-https://github.com/akinloluwami/aeroplane.git}"
+REPO_URL="${AEROPLANE_REPO_URL:-https://github.com/xt42io/aeroplane.git}"
 REPO_BRANCH="${AEROPLANE_REPO_BRANCH:-main}"
 PORT="${AEROPLANE_PORT:-4310}"
 
