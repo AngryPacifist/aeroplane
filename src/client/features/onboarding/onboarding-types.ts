@@ -7,6 +7,7 @@ export type OnboardingForm = {
   dataDir: string;
   deployDryRun: boolean;
   caddyConfigPath: string;
+  caddyDataDir: string;
   caddyReloadCmd: string;
   port: string;
   publicUrl: string;
@@ -36,6 +37,7 @@ export const defaultOnboardingForm: OnboardingForm = {
   dataDir: "./data",
   deployDryRun: false,
   caddyConfigPath: "./data/Caddyfile",
+  caddyDataDir: "./data",
   caddyReloadCmd: "caddy reload --config ./data/Caddyfile",
   port: "4310",
   publicUrl: "http://localhost:5173",

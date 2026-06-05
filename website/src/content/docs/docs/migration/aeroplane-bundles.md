@@ -45,6 +45,7 @@ Some runtime values must stay local to the target server. On import, Aeroplane p
 
 - `DATA_DIR`
 - `CADDY_CONFIG_PATH`
+- `CADDY_DATA_DIR`
 - `CADDY_RELOAD_CMD`
 - `PORT`
 - `HOST`

@@ -189,7 +189,7 @@ export function OnboardingSuccessPage() {
               <SummaryRow
                 icon={Settings01Icon}
                 label="Runtime"
-                value={runtime ? `${runtime.dataDir} / ${runtime.caddyConfigPath}` : "Loading runtime settings"}
+                value={runtime ? `${runtime.dataDir} / ${runtime.caddyConfigPath} / ${runtime.caddyDataDir}` : "Loading runtime settings"}
                 status={runtime?.deployDryRun ? "Dry run" : "Live"}
                 active={Boolean(runtime && !runtime.deployDryRun)}
               />

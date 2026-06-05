@@ -76,6 +76,7 @@ function buildPayload(form: OnboardingForm): OnboardingPayload {
       dataDir: form.dataDir.trim(),
       deployDryRun: form.deployDryRun,
       caddyConfigPath: form.caddyConfigPath.trim(),
+      caddyDataDir: form.caddyDataDir.trim(),
       caddyReloadCmd: form.caddyReloadCmd.trim(),
       port: Number(form.port),
       publicUrl: form.publicUrl.trim(),
@@ -165,6 +166,7 @@ export function OnboardingPage() {
         dataDir: runtime.dataDir,
         deployDryRun: runtime.deployDryRun,
         caddyConfigPath: runtime.caddyConfigPath,
+        caddyDataDir: runtime.caddyDataDir,
         caddyReloadCmd: runtime.caddyReloadCmd,
         port: String(runtime.port),
         publicUrl: runtime.publicUrl,
@@ -212,6 +214,7 @@ export function OnboardingPage() {
         !form.dataDir.trim() ||
         !form.publicUrl.trim() ||
         !form.caddyConfigPath.trim() ||
+        !form.caddyDataDir.trim() ||
         !form.caddyReloadCmd.trim()
       )
         return "Runtime fields are required.";

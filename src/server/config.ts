@@ -62,13 +62,15 @@ function normalizeAeroplaneImage(image: string) {
 const defaultAeroplaneImage = normalizeAeroplaneImage(process.env.AEROPLANE_IMAGE ?? "ghcr.io/xt42io/aeroplane:latest");
 const aeroplaneInstallDir = process.env.AEROPLANE_INSTALL_DIR ?? "/opt/aeroplane";
 const defaultImageUpdateCmd = `docker rm -f aeroplane-self-updater >/dev/null 2>&1 || true; docker run -d --name aeroplane-self-updater -v /var/run/docker.sock:/var/run/docker.sock -v ${aeroplaneInstallDir}:${aeroplaneInstallDir} -w ${aeroplaneInstallDir} ${defaultAeroplaneImage} sh -lc 'docker compose pull aeroplane && docker compose up -d --no-deps aeroplane'`;
+const dataDir = resolve(process.env.DATA_DIR ?? "data");
+const caddyDataDir = process.env.CADDY_DATA_DIR ?? (process.env.CADDY_RELOAD_CMD === "true" ? "/data" : dataDir);
 
 export const config = {
   port: Number(process.env.PORT ?? 4310),
   host: process.env.HOST ?? "0.0.0.0",
   publicUrl: process.env.PUBLIC_URL ?? "http://localhost:5173",
   controlPlaneHostname: process.env.CONTROL_PLANE_HOSTNAME?.trim().toLowerCase() ?? "",
-  dataDir: resolve(process.env.DATA_DIR ?? "data"),
+  dataDir,
   deployDryRun: process.env.DEPLOY_DRY_RUN === "true",
   githubAccessToken: process.env.GITHUB_ACCESS_TOKEN ?? "",
   githubAppId: process.env.GITHUB_APP_ID ?? "",
@@ -80,6 +82,7 @@ export const config = {
   runtimeNetworkName: process.env.AEROPLANE_RUNTIME_NETWORK ?? "aeroplane-runtime",
   secretKey: process.env.AEROPLANE_SECRET_KEY ?? "",
   caddyConfigPath: resolve(process.env.CADDY_CONFIG_PATH ?? "data/Caddyfile"),
+  caddyDataDir,
   caddyReloadCmd: process.env.CADDY_RELOAD_CMD ?? "caddy reload --config ./data/Caddyfile",
   updateRepoUrl: normalizeAeroplaneRepoUrl(process.env.AEROPLANE_UPDATE_REPO_URL ?? aeroplaneRepoUrl),
   updateRepoBranch: process.env.AEROPLANE_UPDATE_BRANCH ?? "main",

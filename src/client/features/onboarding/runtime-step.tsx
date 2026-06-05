@@ -22,6 +22,7 @@ export function RuntimeStep({
         <TextField label="BUILDKIT_HOST" value={form.buildkitHost} onChange={(buildkitHost) => update({ buildkitHost })} required />
         <TextField label="AEROPLANE_RUNTIME_NETWORK" value={form.runtimeNetworkName} onChange={(runtimeNetworkName) => update({ runtimeNetworkName })} required />
         <TextField label="CADDY_CONFIG_PATH" value={form.caddyConfigPath} onChange={(caddyConfigPath) => update({ caddyConfigPath })} required />
+        <TextField label="CADDY_DATA_DIR" value={form.caddyDataDir} onChange={(caddyDataDir) => update({ caddyDataDir })} required />
         <TextField label="CADDY_RELOAD_CMD" value={form.caddyReloadCmd} onChange={(caddyReloadCmd) => update({ caddyReloadCmd })} required />
         <div className="md:col-span-2">
           <ToggleField

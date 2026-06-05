@@ -101,6 +101,7 @@ Then use:
 ```bash
 BUILDKIT_HOST=tcp://127.0.0.1:1234
 CADDY_CONFIG_PATH=./data/Caddyfile
+CADDY_DATA_DIR=/srv/deploy-data
 CADDY_RELOAD_CMD=true
 DEPLOY_DRY_RUN=false
 ```

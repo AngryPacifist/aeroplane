@@ -25,7 +25,7 @@ function caddyTlsConfig(hostname: string) {
 }
 
 function staticSiteDirForService(serviceId: string) {
-  return resolve(process.env.DATA_DIR ?? config.dataDir, "static-sites", serviceId);
+  return resolve(process.env.CADDY_DATA_DIR ?? config.caddyDataDir, "static-sites", serviceId);
 }
 
 function currentControlPlaneHostname() {

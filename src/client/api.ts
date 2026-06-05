@@ -294,6 +294,7 @@ export type AuthStatus = {
     dataDir: string;
     deployDryRun: boolean;
     caddyConfigPath: string;
+    caddyDataDir: string;
     caddyReloadCmd: string;
     port: number;
     publicUrl: string;
@@ -314,6 +315,7 @@ export type OnboardingPayload = {
     dataDir: string;
     deployDryRun: boolean;
     caddyConfigPath: string;
+    caddyDataDir: string;
     caddyReloadCmd: string;
     port: number;
     publicUrl: string;
