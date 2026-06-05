@@ -863,7 +863,7 @@ async function saveUploadedMigrationBundle(c: Context) {
   const passphrase = String(form.get("passphrase") ?? "");
   const bundle = form.get("bundle");
   if (!passphrase || passphrase.length < 8) {
-    throw new Error("Use the migration passphrase from the source VPS.");
+    throw new Error("Use the migration passphrase from the source server.");
   }
   if (!isUploadedMigrationFile(bundle)) {
     throw new Error("Choose an Aeroplane migration bundle.");
