@@ -12,7 +12,7 @@ export function MaintenanceSummaryGrid({ info, loading }: { info: SystemMaintena
       <MaintenanceUsageBar
         label="Root disk free"
         value={info?.disk ? formatBytes(info.disk.availableBytes) : loading ? "Loading" : "Unknown"}
-        detail={info?.disk ? `${formatBytes(info.disk.usedBytes)} used of ${formatBytes(info.disk.totalBytes)} on ${info.disk.mount}.` : "Measured from the VPS root filesystem."}
+        detail={info?.disk ? `${formatBytes(info.disk.usedBytes)} used of ${formatBytes(info.disk.totalBytes)} on ${info.disk.mount}.` : "Measured from the server root filesystem."}
         percent={diskPercent}
         percentLabel={`${Math.round(diskPercent)}% used`}
         tone={diskTone(diskPercent)}
