@@ -32,6 +32,7 @@ import { DeleteProjectModal } from "../components/modals/delete-project-modal";
 import { ProjectPageSkeleton } from "../features/projects/project-page-skeleton";
 import { ProjectPageToolbar } from "../features/projects/project-page-toolbar";
 import type { ServiceFormPayload } from "../features/services/service-form-types";
+import { serviceIsDeploying } from "../lib/deployment-status";
 import { formatTime } from "../lib/format";
 import { usePageTitle } from "../lib/page-title";
 import { dockerImageForService, isDatabaseService, isDockerImageService } from "../../shared/service-source";
@@ -55,10 +56,6 @@ function StatusPill({ status }: { status: string }) {
       {status}
     </span>
   );
-}
-
-function serviceIsDeploying(status: string) {
-  return status === "queued" || status === "building";
 }
 
 export function ProjectPage({ projectSlug }: { projectSlug: string }) {
@@ -105,17 +102,16 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
   }, [loadProject, projectSlug]);
 
   useEffect(() => {
-    if (
-      !currentProject?.services.some((service) =>
-        serviceIsDeploying(service.status),
-      )
-    )
-      return;
+    if (!currentProject) return;
+
+    const hasDeployingService = currentProject.services.some((service) =>
+      serviceIsDeploying(service.status),
+    );
     const interval = setInterval(() => {
       void loadProject();
-    }, 2500);
+    }, hasDeployingService ? 1500 : 6000);
     return () => clearInterval(interval);
-  }, [currentProject, loadProject]);
+  }, [currentProject?.id, currentProject?.services, loadProject]);
 
   useEffect(() => {
     if (!currentProject || editingProject) return;
@@ -382,22 +378,6 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                     const rootLabel = service.rootDir
                       ? service.rootDir
                       : "repository root";
-                    const unavailableLabel =
-                      service.status === "queued" || service.status === "building"
-                        ? "Deploying"
-                        : service.status === "crashed"
-                        ? "Crashed"
-                        : service.status === "failed"
-                          ? "Failed"
-                          : "Not reachable";
-                    const unavailableClass =
-                      service.status === "queued" || service.status === "building"
-                        ? "text-amber-300/80"
-                        : service.status === "crashed"
-                        ? "text-orange-300/80"
-                        : service.status === "failed"
-                          ? "text-rose-300/80"
-                          : "text-zinc-500";
 
                     return (
                       <article
@@ -441,8 +421,8 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                                       Connect at {window.location.hostname}:
                                       {service.hostPort}
                                     </div>
-                                  ) : service.reachable ? (
-                                    <div className="mt-1 flex items-center gap-2.5 min-w-0">
+                                  ) : visibleUrl ? (
+                                    <div className="mt-1 min-w-0">
                                       <a
                                         href={visibleUrl}
                                         target="_blank"
@@ -454,29 +434,8 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                                       >
                                         {visibleLabel}
                                       </a>
-                                      {service.preferredDomain && (
-                                        <span
-                                          className={`inline-flex items-center px-1.5 py-0.2 rounded font-mono text-[9px] uppercase tracking-wider font-bold shrink-0 ${
-                                            service.preferredDomain.status ===
-                                            "active"
-                                              ? "border border-emerald-500/30 bg-emerald-950/25 text-emerald-400"
-                                              : "border border-amber-500/30 bg-amber-950/25 text-amber-400 animate-pulse"
-                                          }`}
-                                        >
-                                          {service.preferredDomain.status ===
-                                          "active"
-                                            ? "✓ Active"
-                                            : "⚡ Pending"}
-                                        </span>
-                                      )}
                                     </div>
-                                  ) : (
-                                    <div
-                                      className={`mt-1 truncate text-sm ${unavailableClass}`}
-                                    >
-                                      {unavailableLabel}
-                                    </div>
-                                  )}
+                                  ) : null}
                                 </div>
                                 <StatusPill status={service.status} />
                               </div>
