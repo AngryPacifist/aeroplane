@@ -14,6 +14,7 @@ import { backupStatusClass, formatBytes, formatDate, storageLabel, triggerLabel 
 type BackupListProps = {
   serviceId: string;
   backups: DatabaseBackupRecord[];
+  automaticEnabled: boolean;
   loading: boolean;
   busy: string;
   deleteId: string;
@@ -27,6 +28,7 @@ type BackupListProps = {
 export function BackupList({
   serviceId,
   backups,
+  automaticEnabled,
   loading,
   busy,
   deleteId,
@@ -46,7 +48,9 @@ export function BackupList({
             </div>
             <h4 className="mt-4 font-hero text-lg text-zinc-100">{loading ? "Loading backups" : "No backups yet"}</h4>
             <p className="mt-2 max-w-md text-sm leading-6 text-zinc-500">
-              Create a backup now, or let automatic daily, weekly, and monthly backups take over.
+              {automaticEnabled
+                ? "Create a backup now, or let automatic daily, weekly, and monthly backups take over."
+                : "Create a backup now, or turn on automatic backups from settings."}
             </p>
           </div>
         </div>
