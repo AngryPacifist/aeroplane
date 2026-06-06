@@ -10,14 +10,14 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import dns from "node:dns/promises";
 import { networkInterfaces } from "node:os";
-import { createReadStream, readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { basename, join, resolve } from "node:path";
 import { z } from "zod";
 import { config } from "./config.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
-import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker } from "./deploy.js";
+import { abortDeployment, allocateHostPort, containerNameForService, enqueueDeployment, getServiceById, removeServiceRuntime, startDeployWorker, staticSiteDirForService } from "./deploy.js";
 import { db, nowIso } from "./db.js";
 import { detectFramework } from "./frameworks.js";
 import { frameworkIconAsset, prewarmFrameworkIconCache } from "./framework-icons.js";
@@ -561,6 +561,10 @@ function checkContainerRunning(containerName: string) {
   });
 }
 
+function checkStaticSiteReady(serviceId: string) {
+  return existsSync(join(staticSiteDirForService(serviceId), "index.html"));
+}
+
 function urlForHostname(hostname: string) {
   const isIpv4Address = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
   return `${isIpv4Address ? "http" : "https"}://${hostname}`;
@@ -571,9 +575,10 @@ async function publicService(service: Service) {
   const isDatabase = isDatabaseService(normalizedService);
   const isDockerImage = isDockerImageService(normalizedService);
   const isWorker = isWorkerService(normalizedService);
+  const isStaticSite = !isDatabase && !isWorker && Boolean(normalizedService.staticOutput?.trim());
   service = normalizedService;
   const appPort = service.activePort ?? service.hostPort;
-  const localUrl = isDatabase || isWorker ? "" : `http://127.0.0.1:${appPort}`;
+  const localUrl = isDatabase || isWorker || isStaticSite ? "" : `http://127.0.0.1:${appPort}`;
   const latestDeployment = db
     .select({ status: deployments.status })
     .from(deployments)
@@ -581,11 +586,13 @@ async function publicService(service: Service) {
     .orderBy(desc(deployments.createdAt))
     .limit(1)
     .get();
-  const shouldProbe = service.status === "active" || service.status === "queued" || service.status === "building";
+  const shouldProbe = service.status === "active";
   const reachable = shouldProbe
     ? isWorker
       ? await checkContainerRunning(containerNameForService(service.id))
-      : await checkPortReachable(appPort)
+      : isStaticSite
+        ? checkStaticSiteReady(service.id)
+        : await checkPortReachable(appPort)
     : false;
   const latestDeploymentIsActive = latestDeployment?.status === "queued" || latestDeployment?.status === "building";
   const liveStatus = service.status === "active" && !reachable && !latestDeploymentIsActive ? "crashed" : service.status;
