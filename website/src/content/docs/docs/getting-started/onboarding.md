@@ -65,7 +65,7 @@ You can still add public custom domains to individual services. The wildcard roo
 
 ## Connect Backup Storage
 
-Automatic backups are off by default. In the Backups step, enable them when new database services should schedule daily, weekly, and monthly backups automatically. You can change this later per database service from its Backups tab.
+Automatic backups are off by default. In the Backups step, enable daily, weekly, or monthly schedules individually when new database services should create backups automatically. You can change these schedules later per database service from its Backups tab.
 
 If you have a Cloudflare R2 bucket or token ready, connect R2 in the same step. Aeroplane can then save database backups to disk, R2, or both.
 
