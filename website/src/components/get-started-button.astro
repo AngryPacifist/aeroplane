@@ -1,0 +1,23 @@
+---
+import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
+
+const arrowIconPaths = ArrowRight02Icon.filter(([tag]) => tag === "path").map(([, attrs]) => ({
+  d: attrs.d,
+  stroke: attrs.stroke,
+  "stroke-linecap": attrs.strokeLinecap,
+  "stroke-linejoin": attrs.strokeLinejoin,
+  "stroke-width": attrs.strokeWidth,
+}));
+---
+
+<a
+  class="aero-button group mt-8 w-fit gap-2 px-6 font-mono text-[0.78rem] uppercase tracking-[0.18em] transition hover:border-[rgba(141,244,235,0.75)] hover:bg-[rgba(79,184,178,0.24)]"
+  data-analytics-event="get_started_clicked"
+  data-analytics-placement="hero"
+  href="/docs/getting-started/install/"
+>
+  <span>Get Started</span>
+  <svg class="size-4 transition group-hover:translate-x-0.5" aria-hidden="true" viewBox="0 0 24 24" fill="none">
+    {arrowIconPaths.map((attrs) => <path {...attrs} />)}
+  </svg>
+</a>
