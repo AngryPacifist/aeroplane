@@ -26,6 +26,7 @@ export type OnboardingForm = {
   r2AccessKeyId: string;
   r2SecretAccessKey: string;
   r2CreateBucket: boolean;
+  databaseBackupsAutomaticEnabled: boolean;
 };
 
 export const defaultOnboardingForm: OnboardingForm = {
@@ -55,5 +56,6 @@ export const defaultOnboardingForm: OnboardingForm = {
   r2Bucket: "",
   r2AccessKeyId: "",
   r2SecretAccessKey: "",
-  r2CreateBucket: true
+  r2CreateBucket: true,
+  databaseBackupsAutomaticEnabled: false
 };
