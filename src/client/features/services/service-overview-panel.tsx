@@ -11,6 +11,7 @@ import {
 import type { Deployment, Domain, EnvVar, Service } from "../../api";
 import { DeployPlaneIcon } from "../../components/icons/deploy-plane-icon";
 import { AppIcon, FrameworkMark, StatusPill, shellButton } from "../../components/ui/primitives";
+import { deploymentIsPending, displayDeploymentStatus } from "../../lib/deployment-status";
 import { formatRelativeTime, formatTime, shortSha } from "../../lib/format";
 import { formatBuildDuration } from "./service-format";
 import type { ServiceTab } from "./service-tabs";
@@ -35,12 +36,6 @@ type OverviewStatProps = {
   value: string;
   meta?: string;
 };
-
-function displayStatus(status: string) {
-  if (status === "running") return "current";
-  if (status === "superseded") return "success";
-  return status;
-}
 
 function repoLabel(service: Service, isDatabase: boolean, databaseEngine: string) {
   if (isDatabase) return databaseEngine ? `${databaseEngine} database` : "database";
@@ -112,7 +107,7 @@ function warningItems({
 
   if (!latest) warnings.push("No deployment has run yet.");
   if (latest?.status === "failed") warnings.push("Latest deployment failed.");
-  if (!service.reachable && service.status !== "building" && service.status !== "queued") warnings.push("Runtime is not reachable.");
+  if (!service.reachable && !deploymentIsPending(service.status)) warnings.push("Runtime is not reachable.");
   if (!isDatabase && !isWorker && domains.some((domain) => domain.status !== "active")) warnings.push("One or more domains still need DNS verification.");
   if (!isDatabase && !isDockerImage && !service.repoFullName && !service.repoUrl) warnings.push("No source repository is connected.");
 
@@ -164,7 +159,7 @@ export function ServiceOverviewPanel({
   onTabChange
 }: ServiceOverviewPanelProps) {
   const latestDeployment = deployments[0] ?? null;
-  const latestStatus = latestDeployment ? displayStatus(latestDeployment.status) : "none";
+  const latestStatus = latestDeployment ? displayDeploymentStatus(latestDeployment.status) : "none";
   const latestDuration = latestDeployment
     ? formatBuildDuration(latestDeployment.startedAt ?? latestDeployment.createdAt, latestDeployment.finishedAt, nowMs)
     : null;
@@ -190,7 +185,7 @@ export function ServiceOverviewPanel({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate font-hero text-2xl font-extrabold tracking-tight text-zinc-100">{service.name}</h2>
-                  <StatusPill status={displayStatus(service.status)} />
+                  <StatusPill status={displayDeploymentStatus(service.status)} />
                 </div>
                 {link.href ? (
                   <a className="mt-1 block truncate font-mono text-xs tracking-[0.16em] text-zinc-500 transition hover:text-[#7fe3dd]" href={link.href} target="_blank" rel="noreferrer">
@@ -318,7 +313,7 @@ export function ServiceOverviewPanel({
                     </span>
                     <span className="truncate text-sm text-zinc-200">{linkedService.name}</span>
                   </div>
-                  <StatusPill status={displayStatus(linkedService.status)} />
+                  <StatusPill status={displayDeploymentStatus(linkedService.status)} />
                 </div>
               ))}
             </div>
@@ -336,7 +331,7 @@ export function ServiceOverviewPanel({
           <div className="divide-y divide-zinc-900">
             {deployments.slice(0, 5).map((deployment) => (
               <div key={deployment.id} className="grid gap-3 py-3 md:grid-cols-[120px_minmax(0,1fr)_120px_110px] md:items-center">
-                <StatusPill status={displayStatus(deployment.status)} />
+                <StatusPill status={displayDeploymentStatus(deployment.status)} />
                 <div className="min-w-0 truncate font-mono text-xs text-zinc-300">{isDockerImage ? deployment.imageTag ?? sourceLabel : shortSha(deployment.commitSha)}</div>
                 <div className="font-mono text-xs text-zinc-500">{deployment.trigger}</div>
                 <div className="font-mono text-xs text-zinc-500">{formatRelativeTime(deployment.createdAt)}</div>
