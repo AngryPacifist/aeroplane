@@ -6,6 +6,7 @@ import { allocateHostPort } from "./deploy.js";
 import { writeAndReloadCaddy } from "./caddy.js";
 import { buildDatabaseConnectionUrl, defaultDatabasePort, generateDatabaseHostname, generatedDatabaseEnvVars, normalizeDatabaseType } from "./database-urls.js";
 import { linkProjectAppDatabaseConnectionEnv, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
+import { initializeDatabaseBackupSettings } from "./database-backups.js";
 import { isPostgresFamilyDatabase } from "./database-engine.js";
 import { ensureDefaultDomainForService } from "./service-domains.js";
 import { recordServiceImportSource } from "./service-import-sources.js";
@@ -710,6 +711,10 @@ ${serviceInstanceCommandSelection}
       createdAt: timestamp,
       updatedAt: timestamp
     }).run();
+
+    if (isDatabase) {
+      initializeDatabaseBackupSettings(targetServiceId);
+    }
 
     const createdService = db.select().from(services).where(eq(services.id, targetServiceId)).get();
     if (createdService) {
