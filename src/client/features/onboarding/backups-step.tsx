@@ -1,10 +1,20 @@
 import { LinkSquare02Icon } from "@hugeicons/core-free-icons";
 import { AppIcon } from "../../components/ui/primitives";
+import type { BackupScheduleTrigger } from "../../api";
 import type { OnboardingForm } from "./onboarding-types";
 import { OnboardingSection, TextField, ToggleField } from "./onboarding-fields";
 
 const accountIdDocsUrl = "https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/";
 const r2TokenDocsUrl = "https://developers.cloudflare.com/r2/api/tokens/";
+const backupScheduleOptions: Array<{
+  trigger: BackupScheduleTrigger;
+  label: string;
+  description: string;
+}> = [
+  { trigger: "daily", label: "Daily backups", description: "Run every 24 hours and keep daily backups for 6 days." },
+  { trigger: "weekly", label: "Weekly backups", description: "Run every 7 days and keep weekly backups for 31 days." },
+  { trigger: "monthly", label: "Monthly backups", description: "Run every 30 days and keep monthly backups for 90 days." }
+];
 
 function ExternalLabelLink({ href, label }: { href: string; label: string }) {
   return (
@@ -40,19 +50,32 @@ export function BackupsStep({
     });
   }
 
+  function updateBackupSchedule(trigger: BackupScheduleTrigger, enabled: boolean) {
+    update({
+      databaseBackupScheduleDefaults: {
+        ...form.databaseBackupScheduleDefaults,
+        [trigger]: enabled
+      }
+    });
+  }
+
   return (
     <OnboardingSection
       eyebrow="Step 05"
       title="Database backups"
       description="Automatic backups are off by default. Turn them on for future databases, and optionally connect R2 for remote backup storage."
     >
-      <div className="mb-4">
-        <ToggleField
-          label="Automatic backups for new databases"
-          checked={form.databaseBackupsAutomaticEnabled}
-          onChange={(databaseBackupsAutomaticEnabled) => update({ databaseBackupsAutomaticEnabled })}
-          description="New database services will schedule daily, weekly, and monthly backups. Each database can still be changed later from its Backups tab."
-        />
+      <div className="mb-4 grid gap-3 md:grid-cols-3">
+        {backupScheduleOptions.map((option) => (
+          <div key={option.trigger} className="border border-zinc-800 bg-zinc-950/50 p-4">
+            <ToggleField
+              label={option.label}
+              checked={form.databaseBackupScheduleDefaults[option.trigger]}
+              onChange={(enabled) => updateBackupSchedule(option.trigger, enabled)}
+              description={option.description}
+            />
+          </div>
+        ))}
       </div>
       {hasR2Input ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-zinc-800 bg-zinc-950/60 px-4 py-3">
