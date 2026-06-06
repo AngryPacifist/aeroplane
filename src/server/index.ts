@@ -52,7 +52,16 @@ import { getSystemMaintenanceInfo, maintenanceCleanupTargets, runSystemMaintenan
 import { writeAndReloadCaddy } from "./caddy.js";
 import { databaseConnectionEnvSuggestionsForProject, databaseConnectionEnvSuggestionsForService, syncProjectDatabaseConnectionEnv } from "./database-service-linker.js";
 import { createUniqueSlug } from "../shared/slug.js";
-import { configuredControlPlaneHostname, getSystemSettings, normalizeDeploymentConcurrency, publicDnsSettings, publicR2Settings, saveSystemSettings } from "./system-settings.js";
+import {
+  backupSchedulesEnabled,
+  configuredControlPlaneHostname,
+  getSystemSettings,
+  normalizeDatabaseBackupScheduleDefaults,
+  normalizeDeploymentConcurrency,
+  publicDnsSettings,
+  publicR2Settings,
+  saveSystemSettings
+} from "./system-settings.js";
 import { applyDnsProviderARecord, dnsProviderName, dnsProviderSettings } from "./dns-providers.js";
 import { getSystemUpdateInfo, startSystemUpdate } from "./system-updates.js";
 import { ensureDefaultDomainForService, ensureDefaultDomainsForExistingServices, isGeneratedServiceHostname } from "./service-domains.js";
@@ -75,6 +84,7 @@ import {
   deleteDatabaseBackup,
   getDatabaseBackupFile,
   getDatabaseBackupSettings,
+  initializeDatabaseBackupSettings,
   listDatabaseBackups,
   restoreDatabaseBackup,
   startDatabaseBackupScheduler,
@@ -239,9 +249,15 @@ const databaseDeleteSchema = z.object({
 const backupCreateSchema = z.object({
   storage: z.enum(["disk", "r2", "disk+r2"]).optional()
 });
+const backupScheduleSettingsSchema = z.object({
+  daily: z.boolean().optional(),
+  weekly: z.boolean().optional(),
+  monthly: z.boolean().optional()
+});
 const backupSettingsSchema = z.object({
   storage: z.enum(["disk", "r2", "disk+r2"]).optional(),
-  automaticEnabled: z.boolean().optional()
+  automaticEnabled: z.boolean().optional(),
+  scheduleEnabled: backupScheduleSettingsSchema.optional()
 });
 const postgresUrlImportSchema = z.object({
   sourceUrl: z.string().trim().min(1, "Postgres URL is required")
@@ -327,12 +343,16 @@ const setupSchema = z.object({
     accessKeyId: optionalString,
     secretAccessKey: optionalString,
     createBucket: z.boolean().default(true)
-  }).optional()
+  }).optional(),
+  databaseBackupScheduleDefaults: backupScheduleSettingsSchema.optional(),
+  databaseBackupsAutomaticEnabled: z.boolean().optional()
 });
 const restartOnboardingSchema = setupSchema.pick({
   env: true,
   rootDomain: true,
-  r2: true
+  r2: true,
+  databaseBackupScheduleDefaults: true,
+  databaseBackupsAutomaticEnabled: true
 });
 
 const createServiceSchema = serviceSettingsSchema.extend({
@@ -694,6 +714,9 @@ function createServiceRecord(projectId: string, input: z.infer<typeof createServ
 
   db.insert(services).values(service).run();
 
+  if (isDatabase) {
+    initializeDatabaseBackupSettings(service.id);
+  }
   ensureDefaultDomainForService(service);
   if (input.env.length > 0) {
     const timestamp = nowIso();
@@ -1025,12 +1048,19 @@ async function applyOnboardingSettings(input: z.infer<typeof restartOnboardingSc
 
   const envPath = writeManagedEnv(managedEnv);
   const controlPlaneHostname = input.env.controlPlaneHostname ?? "";
+  const databaseBackupScheduleDefaults = input.databaseBackupScheduleDefaults
+    ? normalizeDatabaseBackupScheduleDefaults(input.databaseBackupScheduleDefaults)
+    : input.databaseBackupsAutomaticEnabled === undefined
+      ? settings.databaseBackupScheduleDefaults
+      : normalizeDatabaseBackupScheduleDefaults(undefined, input.databaseBackupsAutomaticEnabled);
   config.controlPlaneHostname = controlPlaneHostname;
   updateGithubRuntimeEnv(currentGithubEnv());
   saveSystemSettings({
     ...settings,
     rootDomain: input.rootDomain === undefined ? settings.rootDomain : normalizeRootDomain(input.rootDomain),
     controlPlaneHostname,
+    databaseBackupScheduleDefaults,
+    databaseBackupsAutomaticEnabled: backupSchedulesEnabled(databaseBackupScheduleDefaults),
     r2
   });
   await writeAndReloadCaddy();
@@ -1200,7 +1230,9 @@ app.get("/api/system/settings", async (c) => {
     settings: {
       rootDomain,
       controlPlaneHostname,
-      deploymentConcurrency: settings.deploymentConcurrency
+      deploymentConcurrency: settings.deploymentConcurrency,
+      databaseBackupScheduleDefaults: settings.databaseBackupScheduleDefaults,
+      databaseBackupsAutomaticEnabled: backupSchedulesEnabled(settings.databaseBackupScheduleDefaults)
     },
     publicIp: cachedPublicIp,
     dnsStatus,
@@ -1214,8 +1246,11 @@ app.post("/api/system/settings", async (c) => {
   const hasRootDomain = Object.prototype.hasOwnProperty.call(body, "rootDomain");
   const hasControlPlaneHostname = Object.prototype.hasOwnProperty.call(body, "controlPlaneHostname");
   const hasDeploymentConcurrency = Object.prototype.hasOwnProperty.call(body, "deploymentConcurrency");
+  const hasDatabaseBackupScheduleDefaults = Object.prototype.hasOwnProperty.call(body, "databaseBackupScheduleDefaults");
+  const hasDatabaseBackupsAutomaticEnabled = Object.prototype.hasOwnProperty.call(body, "databaseBackupsAutomaticEnabled");
   const rootDomain = hasRootDomain ? normalizeRootDomain(String(body.rootDomain ?? "")) : normalizeRootDomain(settings.rootDomain);
   let deploymentConcurrency = settings.deploymentConcurrency;
+  let databaseBackupScheduleDefaults = settings.databaseBackupScheduleDefaults;
 
   let controlPlaneHostname = configuredControlPlaneHostname(settings);
   if (hasControlPlaneHostname) {
@@ -1236,7 +1271,20 @@ app.post("/api/system/settings", async (c) => {
     deploymentConcurrency = normalizeDeploymentConcurrency(rawConcurrency);
   }
 
-  saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname, deploymentConcurrency });
+  if (hasDatabaseBackupScheduleDefaults) {
+    const parsed = backupScheduleSettingsSchema.safeParse(body.databaseBackupScheduleDefaults);
+    if (!parsed.success) {
+      return jsonError(parsed.error.issues[0]?.message ?? "Invalid database backup schedule defaults.");
+    }
+    databaseBackupScheduleDefaults = normalizeDatabaseBackupScheduleDefaults(parsed.data);
+  } else if (hasDatabaseBackupsAutomaticEnabled) {
+    if (typeof body.databaseBackupsAutomaticEnabled !== "boolean") {
+      return jsonError("Database backup automation default must be true or false.");
+    }
+    databaseBackupScheduleDefaults = normalizeDatabaseBackupScheduleDefaults(undefined, body.databaseBackupsAutomaticEnabled);
+  }
+
+  saveSystemSettings({ ...settings, rootDomain, controlPlaneHostname, deploymentConcurrency, databaseBackupScheduleDefaults });
   const routingChanged = hasRootDomain || hasControlPlaneHostname;
   if (hasRootDomain && rootDomain) {
     ensureDefaultDomainsForExistingServices(rootDomain);
@@ -1245,7 +1293,17 @@ app.post("/api/system/settings", async (c) => {
     syncAllExistingDatabaseUrls();
   }
   const caddy = routingChanged ? await writeAndReloadCaddy() : undefined;
-  return c.json({ ok: true, settings: { rootDomain, controlPlaneHostname, deploymentConcurrency }, caddy });
+  return c.json({
+    ok: true,
+    settings: {
+      rootDomain,
+      controlPlaneHostname,
+      deploymentConcurrency,
+      databaseBackupScheduleDefaults,
+      databaseBackupsAutomaticEnabled: backupSchedulesEnabled(databaseBackupScheduleDefaults)
+    },
+    caddy
+  });
 });
 
 app.get("/api/system/r2", (c) => c.json({ r2: publicR2Settings() }));
