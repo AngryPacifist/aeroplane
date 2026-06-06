@@ -3,10 +3,22 @@ import { resolve } from "node:path";
 import { config } from "./config.js";
 import { decryptSecret, encryptSecret } from "./secret-crypto.js";
 
+export const databaseBackupScheduleTriggers = ["daily", "weekly", "monthly"] as const;
+export type DatabaseBackupScheduleTrigger = (typeof databaseBackupScheduleTriggers)[number];
+export type DatabaseBackupScheduleDefaults = Record<DatabaseBackupScheduleTrigger, boolean>;
+
+const disabledDatabaseBackupScheduleDefaults: DatabaseBackupScheduleDefaults = {
+  daily: false,
+  weekly: false,
+  monthly: false
+};
+
 export interface SystemSettings {
   rootDomain: string;
   controlPlaneHostname: string;
   deploymentConcurrency: number;
+  databaseBackupScheduleDefaults: DatabaseBackupScheduleDefaults;
+  databaseBackupsAutomaticEnabled?: boolean;
   r2?: R2Settings | null;
   dns?: DnsSettings | null;
 }
@@ -90,6 +102,31 @@ export function normalizeDeploymentConcurrency(value: unknown) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return defaultDeploymentConcurrency;
   return Math.min(maxDeploymentConcurrency, Math.max(1, parsed));
+}
+
+export function backupSchedulesEnabled(scheduleDefaults: DatabaseBackupScheduleDefaults) {
+  return databaseBackupScheduleTriggers.some((trigger) => scheduleDefaults[trigger]);
+}
+
+function scheduleDefaultsFromAutomatic(enabled: boolean): DatabaseBackupScheduleDefaults {
+  return {
+    daily: enabled,
+    weekly: enabled,
+    monthly: enabled
+  };
+}
+
+export function normalizeDatabaseBackupScheduleDefaults(value: unknown, legacyAutomaticEnabled = false): DatabaseBackupScheduleDefaults {
+  if (!value || typeof value !== "object") {
+    return scheduleDefaultsFromAutomatic(legacyAutomaticEnabled);
+  }
+
+  const input = value as Partial<Record<DatabaseBackupScheduleTrigger, unknown>>;
+  return {
+    daily: typeof input.daily === "boolean" ? input.daily : disabledDatabaseBackupScheduleDefaults.daily,
+    weekly: typeof input.weekly === "boolean" ? input.weekly : disabledDatabaseBackupScheduleDefaults.weekly,
+    monthly: typeof input.monthly === "boolean" ? input.monthly : disabledDatabaseBackupScheduleDefaults.monthly
+  };
 }
 
 function decryptR2Settings(r2: SystemSettings["r2"]): SystemSettings["r2"] {
@@ -187,9 +224,15 @@ function encryptDnsSettings(dns: SystemSettings["dns"]): SystemSettings["dns"] {
 
 function serializeSystemSettings(settings: SystemSettings): SystemSettings {
   const deploymentConcurrency = normalizeDeploymentConcurrency(settings.deploymentConcurrency);
+  const databaseBackupScheduleDefaults = normalizeDatabaseBackupScheduleDefaults(
+    settings.databaseBackupScheduleDefaults,
+    settings.databaseBackupsAutomaticEnabled === true
+  );
   return {
     ...settings,
     deploymentConcurrency,
+    databaseBackupScheduleDefaults,
+    databaseBackupsAutomaticEnabled: backupSchedulesEnabled(databaseBackupScheduleDefaults),
     r2: settings.r2
       ? {
           ...settings.r2,
@@ -205,10 +248,16 @@ export function getSystemSettings(): SystemSettings {
     if (existsSync(settingsPath)) {
       const data = readFileSync(settingsPath, "utf8");
       const parsed = JSON.parse(data) as Partial<SystemSettings>;
+      const databaseBackupScheduleDefaults = normalizeDatabaseBackupScheduleDefaults(
+        parsed.databaseBackupScheduleDefaults,
+        parsed.databaseBackupsAutomaticEnabled === true
+      );
       return {
         rootDomain: parsed.rootDomain ?? "",
         controlPlaneHostname: parsed.controlPlaneHostname ?? "",
         deploymentConcurrency: normalizeDeploymentConcurrency(parsed.deploymentConcurrency),
+        databaseBackupScheduleDefaults,
+        databaseBackupsAutomaticEnabled: backupSchedulesEnabled(databaseBackupScheduleDefaults),
         r2: decryptR2Settings(parsed.r2 ?? null),
         dns: decryptDnsSettings(parsed.dns ?? null)
       };
@@ -220,6 +269,8 @@ export function getSystemSettings(): SystemSettings {
     rootDomain: "",
     controlPlaneHostname: "",
     deploymentConcurrency: defaultDeploymentConcurrency,
+    databaseBackupScheduleDefaults: disabledDatabaseBackupScheduleDefaults,
+    databaseBackupsAutomaticEnabled: false,
     r2: null,
     dns: null
   };
