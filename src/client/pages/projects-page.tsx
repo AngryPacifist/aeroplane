@@ -19,11 +19,8 @@ import { SetupTodoList } from "../features/projects/setup-todo-list";
 import { RailwayImportModal } from "../features/integrations/railway-import-modal";
 import type { SystemSettingsTab } from "../components/modals/system-settings-types";
 import { SignOutButton } from "../components/auth/sign-out-button";
+import { serviceIsDeploying } from "../lib/deployment-status";
 import { usePageTitle } from "../lib/page-title";
-
-function serviceIsDeploying(status: string) {
-  return status === "queued" || status === "building";
-}
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -84,6 +81,22 @@ export function ProjectsPage() {
     }
   }, []);
 
+  const refreshProjectCards = useCallback(async () => {
+    try {
+      const projectData = await api.projects();
+      startTransition(() => {
+        setProjects(projectData.projects);
+        setError("");
+      });
+    } catch (issue) {
+      startTransition(() => {
+        setError(
+          issue instanceof Error ? issue.message : "Could not refresh projects",
+        );
+      });
+    }
+  }, []);
+
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
@@ -92,14 +105,14 @@ export function ProjectsPage() {
     const hasDeployingService = projects.some((project) =>
       project.services.some((service) => serviceIsDeploying(service.status)),
     );
-    if (!hasDeployingService) return;
+    if (setupLoading) return;
 
     const interval = setInterval(() => {
-      void loadProjects({ showLoading: false });
-    }, 2500);
+      void refreshProjectCards();
+    }, hasDeployingService ? 1500 : 6000);
 
     return () => clearInterval(interval);
-  }, [loadProjects, projects]);
+  }, [projects, refreshProjectCards, setupLoading]);
 
   useEffect(() => {
     function reloadAfterSettingsClose() {
