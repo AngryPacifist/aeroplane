@@ -2,6 +2,7 @@ import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import type { Deployment, DeploymentLog } from "../../api";
 import { DeployPlaneIcon } from "../../components/icons/deploy-plane-icon";
 import { AppIcon, StatusPill, deploymentCardClass, shellButton } from "../../components/ui/primitives";
+import { displayDeploymentStatus } from "../../lib/deployment-status";
 import { formatTime, shortSha } from "../../lib/format";
 import { DeploymentLogsPanel } from "./service-log-panels";
 import { formatBuildDuration } from "./service-format";
@@ -29,12 +30,6 @@ export function ServiceDeploymentsPanel({
   onDeploy: () => void;
   onAbortActiveDeployment: () => void;
 }) {
-  function displayDeploymentStatus(status: string) {
-    if (status === "running") return "current";
-    if (status === "superseded") return "success";
-    return status;
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
       <div className="min-h-0 overflow-y-auto pr-1 lg:w-[340px] lg:flex-none">
@@ -45,6 +40,11 @@ export function ServiceDeploymentsPanel({
           </button>
           {deployments.map((deployment) => {
             const displayStatus = displayDeploymentStatus(deployment.status);
+            const buildDuration = formatBuildDuration(
+              deployment.startedAt ?? deployment.createdAt,
+              deployment.finishedAt,
+              nowMs
+            );
             return (
               <button
                 key={deployment.id}
@@ -55,7 +55,7 @@ export function ServiceDeploymentsPanel({
                 )}`}
                 onClick={() => onSelectDeployment(deployment.id)}
               >
-                <div>
+                <div className="min-w-0">
                   <div className="text-sm font-medium">{shortSha(deployment.commitSha)}</div>
                   <div
                     className={`mt-1 text-xs ${
@@ -73,9 +73,7 @@ export function ServiceDeploymentsPanel({
                     }`}
                   >
                     {formatTime(deployment.createdAt)}
-                    {deployment.status === "queued" || deployment.status === "building"
-                      ? ` • ${formatBuildDuration(deployment.startedAt ?? deployment.createdAt, deployment.finishedAt, nowMs) ?? "0s"}`
-                      : ""}
+                    {buildDuration ? ` • Build ${buildDuration}` : ""}
                   </div>
                 </div>
                 <StatusPill status={displayStatus} />
