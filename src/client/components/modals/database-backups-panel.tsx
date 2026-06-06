@@ -174,6 +174,7 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
         <BackupList
           serviceId={serviceId}
           backups={backups}
+          automaticEnabled={activeSettings.automaticEnabled}
           loading={loading}
           busy={busy}
           deleteId={deleteId}
