@@ -2,6 +2,7 @@ import {
   ArrowRight02Icon,
   CheckmarkCircle02Icon,
   CloudUploadIcon,
+  DatabaseBackup,
   GithubIcon,
   Globe02Icon,
   Settings01Icon
@@ -155,6 +156,7 @@ export function OnboardingSuccessPage() {
               <SummarySkeletonRow />
               <SummarySkeletonRow />
               <SummarySkeletonRow />
+              <SummarySkeletonRow />
             </>
           ) : (
             <>
@@ -185,6 +187,13 @@ export function OnboardingSuccessPage() {
                 value={r2Status?.connected ? `${r2Status.bucket} (${r2Status.accountId})` : "Not configured"}
                 status={r2Status?.connected ? "Connected" : "Skipped"}
                 active={Boolean(r2Status?.connected)}
+              />
+              <SummaryRow
+                icon={DatabaseBackup}
+                label="Automatic backups"
+                value={domainSettings?.settings.databaseBackupsAutomaticEnabled ? "On for new databases" : "Off for new databases"}
+                status={domainSettings?.settings.databaseBackupsAutomaticEnabled ? "Enabled" : "Disabled"}
+                active={Boolean(domainSettings?.settings.databaseBackupsAutomaticEnabled)}
               />
               <SummaryRow
                 icon={Settings01Icon}
