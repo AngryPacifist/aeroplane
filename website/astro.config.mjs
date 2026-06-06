@@ -2,6 +2,8 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import tailwindcss from "@tailwindcss/vite";
 
+const socialImage = "https://cdn.byteship.cloud/f/p_vId3Rhgf/og.png";
+
 export default defineConfig({
   integrations: [
     starlight({
@@ -9,6 +11,12 @@ export default defineConfig({
       description:
         "Documentation for installing and running Aeroplane, a self-hosted deployment control plane for apps and databases.",
       favicon: "/favicon.svg",
+      head: [
+        { tag: "meta", attrs: { property: "og:image", content: socialImage } },
+        { tag: "meta", attrs: { property: "og:image:alt", content: "Aeroplane docs preview" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: socialImage } },
+        { tag: "meta", attrs: { name: "twitter:image:alt", content: "Aeroplane docs preview" } },
+      ],
       customCss: ["./src/styles/docs.css"],
       disable404Route: true,
       social: [
