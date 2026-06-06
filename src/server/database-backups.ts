@@ -14,20 +14,24 @@ import { db, nowIso, sqlite } from "./db.js";
 import { restoreDatabaseDump } from "./database-restore.js";
 import { deleteR2Object, downloadR2ObjectToFile, uploadFileToR2 } from "./r2-storage.js";
 import { databaseBackups, databaseBackupSettings, envVars, services, type DatabaseBackup, type DatabaseBackupSettings } from "./schema.js";
-import { getSystemSettings, type SystemSettings } from "./system-settings.js";
+import { backupSchedulesEnabled, getSystemSettings, normalizeDatabaseBackupScheduleDefaults, type SystemSettings } from "./system-settings.js";
 
 export type BackupStorageTarget = "disk" | "r2" | "disk+r2";
 export type BackupTrigger = "manual" | "daily" | "weekly" | "monthly";
+export type ScheduledBackupTrigger = Exclude<BackupTrigger, "manual">;
+export type BackupScheduleSettings = Record<ScheduledBackupTrigger, boolean>;
 
 export type PublicDatabaseBackupSettings = {
   storage: BackupStorageTarget;
   automaticEnabled: boolean;
   defaultStorage: BackupStorageTarget;
   schedules: Array<{
-    trigger: Exclude<BackupTrigger, "manual">;
+    trigger: ScheduledBackupTrigger;
     intervalHours: number;
     retentionDays: number;
+    enabled: boolean;
   }>;
+  scheduleEnabled: BackupScheduleSettings;
 };
 
 const backupSchedules = [
@@ -114,7 +118,43 @@ function defaultStorageTarget(settings = getSystemSettings()): BackupStorageTarg
 }
 
 function defaultAutomaticBackupsEnabled(settings = getSystemSettings()) {
-  return settings.databaseBackupsAutomaticEnabled === true;
+  return backupSchedulesEnabled(defaultScheduleSettings(settings));
+}
+
+function defaultScheduleSettings(settings = getSystemSettings()): BackupScheduleSettings {
+  return normalizeDatabaseBackupScheduleDefaults(settings.databaseBackupScheduleDefaults, settings.databaseBackupsAutomaticEnabled === true);
+}
+
+function backupScheduleSettingsEnabled(scheduleEnabled: BackupScheduleSettings) {
+  return backupSchedules.some((schedule) => scheduleEnabled[schedule.trigger]);
+}
+
+function scheduleSettingsFromAutomatic(enabled: boolean): BackupScheduleSettings {
+  return {
+    daily: enabled,
+    weekly: enabled,
+    monthly: enabled
+  };
+}
+
+function normalizeScheduleSettings(
+  input: Partial<Record<ScheduledBackupTrigger, boolean>> | undefined,
+  fallback: BackupScheduleSettings
+): BackupScheduleSettings {
+  return {
+    daily: typeof input?.daily === "boolean" ? input.daily : fallback.daily,
+    weekly: typeof input?.weekly === "boolean" ? input.weekly : fallback.weekly,
+    monthly: typeof input?.monthly === "boolean" ? input.monthly : fallback.monthly
+  };
+}
+
+function rowScheduleSettings(row?: DatabaseBackupSettings | null): BackupScheduleSettings {
+  if (!row) return scheduleSettingsFromAutomatic(false);
+  return {
+    daily: row.dailyEnabled,
+    weekly: row.weeklyEnabled,
+    monthly: row.monthlyEnabled
+  };
 }
 
 function normalizeStorageTarget(value: string | null | undefined): BackupStorageTarget {
@@ -126,11 +166,18 @@ function publicBackupSettings(row?: DatabaseBackupSettings | null): PublicDataba
   const fallback = defaultStorageTarget(settings);
   const storedStorage = normalizeStorageTarget(row?.storage);
   const storage = fallback === "disk" && (storedStorage === "r2" || storedStorage === "disk+r2") ? "disk" : storedStorage;
+  const scheduleEnabled = rowScheduleSettings(row);
   return {
     storage,
-    automaticEnabled: row?.automaticEnabled ?? false,
+    automaticEnabled: backupScheduleSettingsEnabled(scheduleEnabled),
     defaultStorage: fallback,
-    schedules: backupSchedules.map(({ trigger, intervalHours, retentionDays }) => ({ trigger, intervalHours, retentionDays }))
+    schedules: backupSchedules.map(({ trigger, intervalHours, retentionDays }) => ({
+      trigger,
+      intervalHours,
+      retentionDays,
+      enabled: scheduleEnabled[trigger]
+    })),
+    scheduleEnabled
   };
 }
 
@@ -263,11 +310,15 @@ export function initializeDatabaseBackupSettings(serviceId: string, settings: Sy
   if (existing) return publicBackupSettings(existing);
 
   const timestamp = nowIso();
+  const scheduleEnabled = defaultScheduleSettings(settings);
   db.insert(databaseBackupSettings)
     .values({
       serviceId,
       storage: defaultStorageTarget(settings),
       automaticEnabled: defaultAutomaticBackupsEnabled(settings),
+      dailyEnabled: scheduleEnabled.daily,
+      weeklyEnabled: scheduleEnabled.weekly,
+      monthlyEnabled: scheduleEnabled.monthly,
       createdAt: timestamp,
       updatedAt: timestamp
     })
@@ -279,11 +330,17 @@ export function initializeDatabaseBackupSettings(serviceId: string, settings: Sy
 
 export function updateDatabaseBackupSettings(
   serviceId: string,
-  input: { storage?: BackupStorageTarget; automaticEnabled?: boolean }
+  input: { storage?: BackupStorageTarget; automaticEnabled?: boolean; scheduleEnabled?: Partial<Record<ScheduledBackupTrigger, boolean>> }
 ) {
   databaseContext(serviceId);
   const current = getDatabaseBackupSettings(serviceId);
   const storage = input.storage ? normalizeStorageTarget(input.storage) : current.storage;
+  const scheduleEnabled = input.scheduleEnabled
+    ? normalizeScheduleSettings(input.scheduleEnabled, current.scheduleEnabled)
+    : input.automaticEnabled === undefined
+      ? current.scheduleEnabled
+      : scheduleSettingsFromAutomatic(input.automaticEnabled);
+  const automaticEnabled = backupScheduleSettingsEnabled(scheduleEnabled);
   if ((storage === "r2" || storage === "disk+r2") && !getSystemSettings().r2) {
     throw new Error("Connect R2 in System Settings before selecting R2 backups.");
   }
@@ -293,7 +350,10 @@ export function updateDatabaseBackupSettings(
     .values({
       serviceId,
       storage,
-      automaticEnabled: input.automaticEnabled ?? current.automaticEnabled,
+      automaticEnabled,
+      dailyEnabled: scheduleEnabled.daily,
+      weeklyEnabled: scheduleEnabled.weekly,
+      monthlyEnabled: scheduleEnabled.monthly,
       createdAt: timestamp,
       updatedAt: timestamp
     })
@@ -301,7 +361,10 @@ export function updateDatabaseBackupSettings(
       target: databaseBackupSettings.serviceId,
       set: {
         storage,
-        automaticEnabled: input.automaticEnabled ?? current.automaticEnabled,
+        automaticEnabled,
+        dailyEnabled: scheduleEnabled.daily,
+        weeklyEnabled: scheduleEnabled.weekly,
+        monthlyEnabled: scheduleEnabled.monthly,
         updatedAt: timestamp
       }
     })
@@ -541,6 +604,7 @@ async function runAutomaticBackupsOnce() {
     if (!settings.automaticEnabled) continue;
 
     for (const schedule of backupSchedules) {
+      if (!settings.scheduleEnabled[schedule.trigger]) continue;
       const key = `${service.id}:${schedule.trigger}`;
       if (activeAutomaticBackups.has(key)) continue;
 
