@@ -38,7 +38,7 @@ PostgreSQL-family services can enable logical replication. Aeroplane also create
 
 Database backups are created locally first. Depending on the selected storage target, Aeroplane then keeps the local disk file, uploads it to Cloudflare R2, or does both.
 
-Automatic backups run in the background for daily, weekly, and monthly schedules. Manual backups run from the database Backups tab.
+Enabled automatic schedules run in the background for daily, weekly, or monthly backups. Manual backups run from the database Backups tab.
 
 ## Migration Flow
 
