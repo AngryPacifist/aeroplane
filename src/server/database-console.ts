@@ -10,6 +10,7 @@ import {
   type DatabaseColumn,
   type DatabaseContext,
   type DatabaseRowFilter,
+  type DatabaseSchema,
   type DatabaseTable,
   type RowData
 } from "./database-viewer-shared.js";
@@ -263,6 +264,7 @@ function unsupportedResponse(ctx: DatabaseContext) {
     engine: ctx.dbType,
     supported: false,
     editable: false,
+    schemas: [] as DatabaseSchema[],
     tables: [] as DatabaseTable[],
     message: `${ctx.dbType} browsing is not available yet.`
   };
@@ -273,6 +275,7 @@ function runtimeNoticeResponse(ctx: DatabaseContext, runtimeNotice: DatabaseRunt
     engine: ctx.dbType,
     supported: true,
     editable: false,
+    schemas: [] as DatabaseSchema[],
     tables: [] as DatabaseTable[],
     message: runtimeNotice.message,
     runtimeState: runtimeNotice.runtimeState,
@@ -312,6 +315,18 @@ async function getDatabaseTablesForContext(ctx: DatabaseContext, logicalDatabase
 
   if (isPostgresFamilyDatabase(ctx.dbType)) {
     const timescaleSchemaFilter = ctx.dbType === "timescale" ? "AND table_schema !~ '^_timescaledb_'" : "";
+    const timescaleSchemaNameFilter = ctx.dbType === "timescale" ? "AND schema_name !~ '^_timescaledb_'" : "";
+    const schemas = await postgresJson<DatabaseSchema[]>(ctx, `
+      SELECT COALESCE(json_agg(row_to_json(s)), '[]'::json)
+      FROM (
+        SELECT schema_name AS name
+        FROM information_schema.schemata
+        WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+          AND schema_name !~ '^pg_'
+          ${timescaleSchemaNameFilter}
+        ORDER BY schema_name
+      ) s
+    `);
     const tables = await postgresJson<DatabaseTable[]>(ctx, `
       SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json)
       FROM (
@@ -319,15 +334,20 @@ async function getDatabaseTablesForContext(ctx: DatabaseContext, logicalDatabase
         FROM information_schema.tables
         WHERE table_type = 'BASE TABLE'
           AND table_schema NOT IN ('pg_catalog', 'information_schema')
+          AND table_schema !~ '^pg_'
           ${timescaleSchemaFilter}
         ORDER BY table_schema, table_name
       ) t
     `);
     const countedTables = await withTableRowCounts(tables, (tableId) => postgresJson<number>(ctx, `SELECT count(*) FROM ${postgresTableSql(tableId)}`));
-    return { engine: ctx.dbType, supported: true, editable: true, tables: countedTables };
+    return { engine: ctx.dbType, supported: true, editable: true, schemas, tables: countedTables };
   }
 
   if (ctx.dbType === "mysql") {
+    const schemaRows = parseTsv(await runMysql(ctx, "SELECT DATABASE() AS name")).rows;
+    const schemas = schemaRows
+      .map((row) => ({ name: String(row.name ?? "") }))
+      .filter((schema) => schema.name);
     const parsed = parseTsv(await runMysql(ctx, `
       SELECT TABLE_SCHEMA AS \`schema\`, TABLE_NAME AS name, CONCAT(TABLE_SCHEMA, '.', TABLE_NAME) AS id
       FROM INFORMATION_SCHEMA.TABLES
@@ -344,9 +364,17 @@ async function getDatabaseTablesForContext(ctx: DatabaseContext, logicalDatabase
       const countParsed = parseTsv(await runMysql(ctx, `SELECT COUNT(*) AS rowCount FROM ${mysqlTableSql(tableId)}`));
       return Number(countParsed.rows[0]?.rowCount ?? 0);
     });
-    return { engine: ctx.dbType, supported: true, editable: true, tables: countedTables };
+    return { engine: ctx.dbType, supported: true, editable: true, schemas, tables: countedTables };
   }
 
+  const schemaRows = parseJsonEachRow(await runClickHouse(ctx, `
+    SELECT name
+    FROM system.databases
+    WHERE name NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+    ORDER BY name
+    FORMAT JSONEachRow
+  `));
+  const schemas = schemaRows.map((row) => ({ name: String(row.name) }));
   const tableRows = parseJsonEachRow(await runClickHouse(ctx, `
     SELECT database AS schema, name, concat(database, '.', name) AS id
     FROM system.tables
@@ -367,7 +395,7 @@ async function getDatabaseTablesForContext(ctx: DatabaseContext, logicalDatabase
     `));
     return Number(countRows[0]?.rowCount ?? 0);
   });
-  return { engine: ctx.dbType, supported: true, editable: false, tables: countedTables };
+  return { engine: ctx.dbType, supported: true, editable: false, schemas, tables: countedTables };
 }
 
 export async function getDatabaseRows(serviceId: string, table: string, limit: number, offset: number, filters: DatabaseRowFilter[] = []) {
