@@ -19,7 +19,7 @@
     "caddy"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.2",
     "@codemirror/lang-javascript": "^6.2.5",
