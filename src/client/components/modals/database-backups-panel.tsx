@@ -5,9 +5,9 @@ import {
   Settings01Icon
 } from "@hugeicons/core-free-icons";
 import { useCallback, useEffect, useState } from "react";
-import { api, type BackupStorageTarget, type DatabaseBackup as DatabaseBackupRecord, type DatabaseBackupSettings, type R2SettingsStatus } from "../../api";
+import { api, type BackupScheduleEnabled, type BackupStorageTarget, type DatabaseBackup as DatabaseBackupRecord, type DatabaseBackupSettings, type R2SettingsStatus } from "../../api";
 import { AppIcon, shellButton } from "../ui/primitives";
-import { defaultSettings, storageLabel } from "./database-backups/backup-format";
+import { defaultSettings, disabledBackupScheduleEnabled, storageLabel } from "./database-backups/backup-format";
 import { BackupList } from "./database-backups/backup-list";
 import { BackupSettingsModal } from "./database-backups/backup-settings-modal";
 
@@ -20,7 +20,9 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
   const [restoreId, setRestoreId] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftStorage, setDraftStorage] = useState<BackupStorageTarget>("disk");
-  const [draftAutomatic, setDraftAutomatic] = useState(true);
+  const [draftScheduleEnabled, setDraftScheduleEnabled] = useState<BackupScheduleEnabled>({
+    ...disabledBackupScheduleEnabled
+  });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -35,7 +37,7 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
       setBackups(result.backups);
       setSettings(result.settings);
       setDraftStorage(result.settings.storage);
-      setDraftAutomatic(result.settings.automaticEnabled);
+      setDraftScheduleEnabled({ ...result.settings.scheduleEnabled });
       setR2(result.r2);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Could not load backups");
@@ -71,7 +73,7 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
     try {
       const result = await api.updateDatabaseBackupSettings(serviceId, {
         storage: draftStorage,
-        automaticEnabled: draftAutomatic
+        scheduleEnabled: draftScheduleEnabled
       });
       setSettings(result.settings);
       setSettingsOpen(false);
@@ -117,8 +119,15 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
 
   function openSettings() {
     setDraftStorage(activeSettings.storage);
-    setDraftAutomatic(activeSettings.automaticEnabled);
+    setDraftScheduleEnabled({ ...activeSettings.scheduleEnabled });
     setSettingsOpen(true);
+  }
+
+  function updateDraftSchedule(trigger: keyof BackupScheduleEnabled, enabled: boolean) {
+    setDraftScheduleEnabled((current) => ({
+      ...current,
+      [trigger]: enabled
+    }));
   }
 
   const loading = busy === "load";
@@ -191,12 +200,12 @@ export function DatabaseBackupsPanel({ serviceId }: { serviceId: string }) {
         activeSettings={activeSettings}
         r2Connected={r2Connected}
         draftStorage={draftStorage}
-        draftAutomatic={draftAutomatic}
+        draftScheduleEnabled={draftScheduleEnabled}
         saving={savingSettings}
         onClose={() => setSettingsOpen(false)}
         onSave={() => void saveSettings()}
         onDraftStorageChange={setDraftStorage}
-        onDraftAutomaticChange={setDraftAutomatic}
+        onDraftScheduleChange={updateDraftSchedule}
       />
     </>
   );
