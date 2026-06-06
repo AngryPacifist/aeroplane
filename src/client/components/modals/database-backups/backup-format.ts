@@ -1,5 +1,11 @@
-import type { BackupStorageTarget, DatabaseBackup as DatabaseBackupRecord, DatabaseBackupSettings } from "../../../api";
+import type { BackupScheduleEnabled, BackupStorageTarget, DatabaseBackup as DatabaseBackupRecord, DatabaseBackupSettings } from "../../../api";
 import { statusClass } from "../../ui/primitives";
+
+export const disabledBackupScheduleEnabled: BackupScheduleEnabled = {
+  daily: false,
+  weekly: false,
+  monthly: false
+};
 
 export function formatBytes(value: number | null) {
   if (!value) return "0 B";
@@ -44,10 +50,11 @@ export function defaultSettings(r2Connected: boolean): DatabaseBackupSettings {
     storage: r2Connected ? "disk+r2" : "disk",
     defaultStorage: r2Connected ? "disk+r2" : "disk",
     automaticEnabled: false,
+    scheduleEnabled: disabledBackupScheduleEnabled,
     schedules: [
-      { trigger: "daily", intervalHours: 24, retentionDays: 6 },
-      { trigger: "weekly", intervalHours: 168, retentionDays: 31 },
-      { trigger: "monthly", intervalHours: 720, retentionDays: 90 }
+      { trigger: "daily", intervalHours: 24, retentionDays: 6, enabled: false },
+      { trigger: "weekly", intervalHours: 168, retentionDays: 31, enabled: false },
+      { trigger: "monthly", intervalHours: 720, retentionDays: 90, enabled: false }
     ]
   };
 }
