@@ -100,7 +100,7 @@ function buildPayload(form: OnboardingForm): OnboardingPayload {
           createBucket: form.r2CreateBucket,
         }
       : undefined,
-    databaseBackupsAutomaticEnabled: form.databaseBackupsAutomaticEnabled,
+    databaseBackupScheduleDefaults: form.databaseBackupScheduleDefaults,
   };
 }
 
@@ -112,7 +112,7 @@ function buildRestartPayload(
     env: payload.env,
     rootDomain: payload.rootDomain,
     r2: payload.r2,
-    databaseBackupsAutomaticEnabled: payload.databaseBackupsAutomaticEnabled,
+    databaseBackupScheduleDefaults: payload.databaseBackupScheduleDefaults,
   };
 }
 
@@ -188,8 +188,8 @@ export function OnboardingPage() {
               result.settings.controlPlaneHostname ||
               current.controlPlaneHostname,
             rootDomain: wildcardRootDomain(result.settings.rootDomain),
-            databaseBackupsAutomaticEnabled:
-              result.settings.databaseBackupsAutomaticEnabled,
+            databaseBackupScheduleDefaults:
+              result.settings.databaseBackupScheduleDefaults,
           }));
         })
         .catch(() => undefined);
