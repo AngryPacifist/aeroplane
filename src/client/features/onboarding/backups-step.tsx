@@ -44,12 +44,20 @@ export function BackupsStep({
     <OnboardingSection
       eyebrow="Step 05"
       title="Database backups"
-      description="R2 is optional. Fill all four R2 fields to enable remote backups, or skip this step and use disk backups only."
+      description="Automatic backups are off by default. Turn them on for future databases, and optionally connect R2 for remote backup storage."
     >
+      <div className="mb-4">
+        <ToggleField
+          label="Automatic backups for new databases"
+          checked={form.databaseBackupsAutomaticEnabled}
+          onChange={(databaseBackupsAutomaticEnabled) => update({ databaseBackupsAutomaticEnabled })}
+          description="New database services will schedule daily, weekly, and monthly backups. Each database can still be changed later from its Backups tab."
+        />
+      </div>
       {hasR2Input ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border border-zinc-800 bg-zinc-950/60 px-4 py-3">
           <p className="text-sm leading-6 text-zinc-400">
-            Want to finish setup without Cloudflare R2? Clear these fields and Aeroplane will use disk backups.
+            Want to finish setup without Cloudflare R2? Clear these fields and Aeroplane will keep backup storage on disk.
           </p>
           <button
             type="button"
