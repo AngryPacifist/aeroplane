@@ -97,7 +97,10 @@ export const databaseBackups = sqliteTable("database_backups", {
 export const databaseBackupSettings = sqliteTable("database_backup_settings", {
   serviceId: text("project_id").primaryKey(),
   storage: text("storage").notNull(),
-  automaticEnabled: integer("automatic_enabled", { mode: "boolean" }).notNull().default(true),
+  automaticEnabled: integer("automatic_enabled", { mode: "boolean" }).notNull().default(false),
+  dailyEnabled: integer("daily_enabled", { mode: "boolean" }).notNull().default(false),
+  weeklyEnabled: integer("weekly_enabled", { mode: "boolean" }).notNull().default(false),
+  monthlyEnabled: integer("monthly_enabled", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull()
 });
