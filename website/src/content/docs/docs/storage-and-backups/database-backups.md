@@ -43,7 +43,7 @@ Local disk backups are fast and easy to restore, but they are still on the same 
 
 ## Automatic Schedules
 
-Automatic backups are enabled by default for database services.
+Automatic backups are off by default for database services unless you enable them during onboarding. You can turn them on or off per database service from the Backups tab.
 
 Aeroplane runs:
 
