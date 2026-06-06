@@ -798,6 +798,11 @@ export function ServicePageShell({
                           <BrowserIconFallback size={17} />
                           <span className="truncate">{service.primaryUrl.replace("127.0.0.1", window.location.hostname).replace(/^https?:\/\//, "")}</span>
                         </a>
+                      ) : service?.status === "queued" || service?.status === "building" ? (
+                        <div className="flex items-center gap-3 border border-amber-500/20 bg-amber-950/20 px-3 py-3 text-sm text-amber-100">
+                          <BrowserIconFallback size={17} />
+                          <span className="truncate">Deployment in progress</span>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-3 border border-rose-500/20 bg-rose-950/20 px-3 py-3 text-sm text-rose-200">
                           <BrowserIconFallback size={17} />
