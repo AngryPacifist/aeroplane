@@ -383,13 +383,17 @@ export function ProjectPage({ projectSlug }: { projectSlug: string }) {
                       ? service.rootDir
                       : "repository root";
                     const unavailableLabel =
-                      service.status === "crashed"
+                      service.status === "queued" || service.status === "building"
+                        ? "Deploying"
+                        : service.status === "crashed"
                         ? "Crashed"
                         : service.status === "failed"
                           ? "Failed"
                           : "Not reachable";
                     const unavailableClass =
-                      service.status === "crashed"
+                      service.status === "queued" || service.status === "building"
+                        ? "text-amber-300/80"
+                        : service.status === "crashed"
                         ? "text-orange-300/80"
                         : service.status === "failed"
                           ? "text-rose-300/80"
