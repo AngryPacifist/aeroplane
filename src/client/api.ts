@@ -196,7 +196,8 @@ export type SystemSettings = {
   rootDomain: string;
   controlPlaneHostname: string;
   deploymentConcurrency: number;
-  databaseBackupsAutomaticEnabled: boolean;
+  databaseBackupScheduleDefaults: BackupScheduleEnabled;
+  databaseBackupsAutomaticEnabled?: boolean;
 };
 
 export type DatabaseBackup = {
@@ -219,16 +220,20 @@ export type DatabaseBackup = {
 };
 
 export type BackupStorageTarget = "disk" | "r2" | "disk+r2";
+export type BackupScheduleTrigger = "daily" | "weekly" | "monthly";
+export type BackupScheduleEnabled = Record<BackupScheduleTrigger, boolean>;
 
 export type DatabaseBackupSettings = {
   storage: BackupStorageTarget;
   automaticEnabled: boolean;
   defaultStorage: BackupStorageTarget;
   schedules: Array<{
-    trigger: "daily" | "weekly" | "monthly";
+    trigger: BackupScheduleTrigger;
     intervalHours: number;
     retentionDays: number;
+    enabled: boolean;
   }>;
+  scheduleEnabled: BackupScheduleEnabled;
 };
 
 export type ServiceImportSource = {
@@ -343,6 +348,7 @@ export type OnboardingPayload = {
     secretAccessKey?: string;
     createBucket?: boolean;
   };
+  databaseBackupScheduleDefaults?: BackupScheduleEnabled;
   databaseBackupsAutomaticEnabled?: boolean;
 };
 
@@ -744,7 +750,13 @@ export const api = {
       dnsStatus?: "active" | "pending";
       controlPlaneDnsStatus?: "active" | "pending";
     }>("/api/system/settings"),
-  updateSystemSettings: (body: { rootDomain?: string; controlPlaneHostname?: string; deploymentConcurrency?: number; databaseBackupsAutomaticEnabled?: boolean }) =>
+  updateSystemSettings: (body: {
+    rootDomain?: string;
+    controlPlaneHostname?: string;
+    deploymentConcurrency?: number;
+    databaseBackupScheduleDefaults?: BackupScheduleEnabled;
+    databaseBackupsAutomaticEnabled?: boolean;
+  }) =>
     request<{ ok: boolean; settings: SystemSettings; caddy?: { ok: boolean; detail: string } }>("/api/system/settings", {
       method: "POST",
       body: JSON.stringify(body)
@@ -833,7 +845,7 @@ export const api = {
   },
   databaseBackups: (serviceId: string) =>
     request<{ backups: DatabaseBackup[]; settings: DatabaseBackupSettings; r2: R2SettingsStatus }>(`/api/services/${serviceId}/database/backups`),
-  updateDatabaseBackupSettings: (serviceId: string, body: Partial<Pick<DatabaseBackupSettings, "storage" | "automaticEnabled">>) =>
+  updateDatabaseBackupSettings: (serviceId: string, body: Partial<Pick<DatabaseBackupSettings, "storage" | "automaticEnabled" | "scheduleEnabled">>) =>
     request<{ settings: DatabaseBackupSettings }>(`/api/services/${serviceId}/database/backups/settings`, {
       method: "PATCH",
       body: JSON.stringify(body)
