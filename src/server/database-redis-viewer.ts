@@ -15,6 +15,55 @@ type RedisKeyTarget = {
   database: number;
 };
 
+const redisTableScanLimit = 2000;
+const redisTableScanCount = 500;
+const redisTableScanScript = `
+local cursor = "0"
+local limit = tonumber(ARGV[1]) or 2000
+local scan_count = tonumber(ARGV[2]) or 500
+local seen = {}
+local result = {}
+
+repeat
+  local scan = redis.call("SCAN", cursor, "COUNT", scan_count)
+  cursor = scan[1]
+
+  for _, key in ipairs(scan[2]) do
+    if not seen[key] then
+      seen[key] = true
+
+      local type_reply = redis.call("TYPE", key)
+      local kind = type(type_reply) == "table" and type_reply.ok or type_reply
+      local row_count = "null"
+
+      if kind == "string" then
+        row_count = "1"
+      elseif kind == "list" then
+        row_count = tostring(redis.call("LLEN", key))
+      elseif kind == "set" then
+        row_count = tostring(redis.call("SCARD", key))
+      elseif kind == "zset" then
+        row_count = tostring(redis.call("ZCARD", key))
+      elseif kind == "hash" then
+        row_count = tostring(redis.call("HLEN", key))
+      elseif kind == "stream" then
+        row_count = tostring(redis.call("XLEN", key))
+      end
+
+      table.insert(result, key)
+      table.insert(result, kind)
+      table.insert(result, row_count)
+
+      if (#result / 3) >= limit then
+        return result
+      end
+    end
+  end
+until cursor == "0"
+
+return result
+`;
+
 export function redisDatabase(value: unknown) {
   const database = Number(value ?? 0);
   if (!Number.isInteger(database) || database < 0 || database > 255) throw new Error("Redis database must be a number between 0 and 255");
@@ -135,20 +184,6 @@ async function redisKeyType(ctx: DatabaseContext, key: string, database: number)
   return (await runRedis(ctx, ["TYPE", key], database)).trim() || "none";
 }
 
-async function redisKeyCount(ctx: DatabaseContext, key: string, type: string, database: number) {
-  try {
-    if (type === "string") return 1;
-    if (type === "list") return Number(await runRedis(ctx, ["LLEN", key], database));
-    if (type === "set") return Number(await runRedis(ctx, ["SCARD", key], database));
-    if (type === "zset") return Number(await runRedis(ctx, ["ZCARD", key], database));
-    if (type === "hash") return Number(await runRedis(ctx, ["HLEN", key], database));
-    if (type === "stream") return Number(await runRedis(ctx, ["XLEN", key], database));
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 function baseColumns(rows: RowData[], preferredNames: string[]) {
   return columnsFromRows(rows, preferredNames).map((column) => ({
     ...column,
@@ -172,27 +207,27 @@ function tableResponse(ctx: DatabaseContext, rows: RowData[], columns: DatabaseC
 
 export async function getRedisTables(ctx: DatabaseContext, database = 0) {
   const logicalDatabase = redisDatabase(database);
-  const keys: string[] = [];
-  let cursor = "0";
-  do {
-    const scanOutput = await runRedis(ctx, ["SCAN", cursor, "COUNT", "500"], logicalDatabase);
-    const lines = parseLines(scanOutput);
-    cursor = lines[0] ?? "0";
-    keys.push(...lines.slice(1));
-  } while (cursor !== "0" && keys.length < 2000);
-  keys.sort((left, right) => left.localeCompare(right));
-
+  const summaries = parseLines(await runRedis(
+    ctx,
+    ["EVAL", redisTableScanScript, "0", String(redisTableScanLimit), String(redisTableScanCount)],
+    logicalDatabase
+  ));
   const tables: DatabaseTable[] = [];
 
-  for (const key of keys) {
-    const type = await redisKeyType(ctx, key, logicalDatabase);
+  for (let index = 0; index < summaries.length; index += 3) {
+    const key = summaries[index] ?? "";
+    if (!key) continue;
+    const type = summaries[index + 1] || "none";
+    const rowCount = Number(summaries[index + 2]);
+
     tables.push({
       id: redisKeyId(key, logicalDatabase),
       schema: type,
       name: key,
-      rowCount: await redisKeyCount(ctx, key, type, logicalDatabase)
+      rowCount: Number.isFinite(rowCount) ? rowCount : null
     });
   }
+  tables.sort((left, right) => left.name.localeCompare(right.name));
 
   return {
     engine: ctx.dbType,
