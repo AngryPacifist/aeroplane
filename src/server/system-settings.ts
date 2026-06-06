@@ -269,7 +269,7 @@ export function getSystemSettings(): SystemSettings {
     rootDomain: "",
     controlPlaneHostname: "",
     deploymentConcurrency: defaultDeploymentConcurrency,
-    databaseBackupScheduleDefaults: disabledDatabaseBackupScheduleDefaults,
+    databaseBackupScheduleDefaults: scheduleDefaultsFromAutomatic(false),
     databaseBackupsAutomaticEnabled: false,
     r2: null,
     dns: null
