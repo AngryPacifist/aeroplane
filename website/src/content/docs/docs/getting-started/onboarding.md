@@ -65,7 +65,9 @@ You can still add public custom domains to individual services. The wildcard roo
 
 ## Connect Backup Storage
 
-If you have a Cloudflare R2 bucket or token ready, open the Storage step and connect R2. Aeroplane can then save database backups to disk, R2, or both.
+Automatic backups are off by default. In the Backups step, enable them when new database services should schedule daily, weekly, and monthly backups automatically. You can change this later per database service from its Backups tab.
+
+If you have a Cloudflare R2 bucket or token ready, connect R2 in the same step. Aeroplane can then save database backups to disk, R2, or both.
 
 The default backup destination is:
 
