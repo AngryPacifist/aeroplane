@@ -15,6 +15,11 @@ import { usePageTitle } from "../lib/page-title";
 import { wildcardRootDomain } from "../lib/root-domain";
 
 type DomainSettings = Awaited<ReturnType<typeof api.systemSettings>>;
+const backupScheduleLabels = {
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly"
+} as const;
 
 function statusTone(active: boolean) {
   return active ? statusClass("active") : statusClass("pending");
@@ -22,6 +27,15 @@ function statusTone(active: boolean) {
 
 function hostnameUrl(hostname: string) {
   return `https://${hostname}`;
+}
+
+function enabledBackupScheduleLabel(settings: DomainSettings | null) {
+  const scheduleDefaults = settings?.settings.databaseBackupScheduleDefaults;
+  if (!scheduleDefaults) return "Off for new databases";
+  const enabled = (Object.keys(backupScheduleLabels) as Array<keyof typeof backupScheduleLabels>)
+    .filter((trigger) => scheduleDefaults[trigger])
+    .map((trigger) => backupScheduleLabels[trigger]);
+  return enabled.length > 0 ? `${enabled.join(", ")} for new databases` : "Off for new databases";
 }
 
 function SummaryRow({
@@ -110,6 +124,10 @@ export function OnboardingSuccessPage() {
 
   const dashboardHostname = domainSettings?.settings.controlPlaneHostname ?? "";
   const rootDomain = domainSettings?.settings.rootDomain ?? "";
+  const backupSchedulesEnabled = Boolean(
+    domainSettings &&
+      Object.values(domainSettings.settings.databaseBackupScheduleDefaults).some(Boolean)
+  );
   const runtime = authStatus?.runtimeConfig;
   const dashboardDnsActive = Boolean(dashboardHostname && domainSettings?.controlPlaneDnsStatus === "active");
   const dashboardUrl = useMemo(() => {
@@ -191,9 +209,9 @@ export function OnboardingSuccessPage() {
               <SummaryRow
                 icon={DatabaseBackup}
                 label="Automatic backups"
-                value={domainSettings?.settings.databaseBackupsAutomaticEnabled ? "On for new databases" : "Off for new databases"}
-                status={domainSettings?.settings.databaseBackupsAutomaticEnabled ? "Enabled" : "Disabled"}
-                active={Boolean(domainSettings?.settings.databaseBackupsAutomaticEnabled)}
+                value={enabledBackupScheduleLabel(domainSettings)}
+                status={backupSchedulesEnabled ? "Enabled" : "Disabled"}
+                active={backupSchedulesEnabled}
               />
               <SummaryRow
                 icon={Settings01Icon}
