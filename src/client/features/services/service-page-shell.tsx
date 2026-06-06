@@ -15,7 +15,7 @@ import {
   DashboardSquare02Icon,
   DatabaseExportIcon
 } from "@hugeicons/core-free-icons";
-import { FormEvent, startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type DeploymentLog,
@@ -55,6 +55,7 @@ import { RedeployRequiredToast } from "./redeploy-required-toast";
 import { RuntimeModeControl } from "../../components/ui/runtime-mode-control";
 import type { ServiceTab } from "./service-tabs";
 import { dockerImageForService, dockerImageRepoFullName, isDatabaseService, isDockerImageService } from "../../../shared/service-source";
+import { deploymentIsPending, mergeDeploymentList } from "../../lib/deployment-status";
 
 function textOrNull(value: string) {
   const trimmed = value.trim();
@@ -72,10 +73,6 @@ const serviceTabLabels: Record<ServiceTab, string> = {
   backups: "Backups",
   settings: "Settings"
 };
-
-function deploymentIsPending(status: string) {
-  return status === "queued" || status === "building";
-}
 
 function actionRequiresRedeploy(label: string) {
   return label === "env" || label === "settings";
@@ -142,6 +139,7 @@ export function ServicePageShell({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const lastDeploymentRefreshRef = useRef(0);
 
   const loadOverview = useCallback(async (options: { showLoading?: boolean } = {}) => {
     const showLoading = options.showLoading ?? true;
@@ -193,16 +191,27 @@ export function ServicePageShell({
   }, [loadOverview, serviceId]);
 
   useEffect(() => {
-    const hasActiveDeployment = overview?.deployments.some((deployment) => deploymentIsPending(deployment.status));
-    if (!hasActiveDeployment && !deploymentIsPending(overview?.service.status ?? "")) return;
+    if (!overview) return;
+
+    const hasActiveDeployment = overview.deployments.some((deployment) => deploymentIsPending(deployment.status));
+    const hasPendingService = deploymentIsPending(overview.service.status);
+    const refreshMs = hasActiveDeployment || hasPendingService ? 1000 : 5000;
 
     const interval = setInterval(() => {
       void loadOverview({ showLoading: false });
-      void onProjectRefresh();
-    }, 2000);
+      if (hasActiveDeployment || hasPendingService) void onProjectRefresh();
+    }, refreshMs);
 
     return () => clearInterval(interval);
   }, [loadOverview, onProjectRefresh, overview]);
+
+  const refreshDeploymentState = useCallback(() => {
+    const nextRefreshAt = Date.now();
+    if (nextRefreshAt - lastDeploymentRefreshRef.current < 900) return;
+    lastDeploymentRefreshRef.current = nextRefreshAt;
+    void loadOverview({ showLoading: false });
+    void onProjectRefresh();
+  }, [loadOverview, onProjectRefresh]);
 
   const activeDeployment = useMemo(
     () => overview?.deployments.find((deployment) => deployment.id === activeDeploymentId) ?? null,
@@ -228,14 +237,19 @@ export function ServicePageShell({
     const events = new EventSource(`/api/deployments/${activeDeploymentId}/stream`);
     events.addEventListener("snapshot", (event) => {
       startTransition(() => setDeploymentLogs(JSON.parse((event as MessageEvent).data)));
+      refreshDeploymentState();
     });
     events.addEventListener("log", (event) => {
       const log = JSON.parse((event as MessageEvent).data) as DeploymentLog;
       startTransition(() => setDeploymentLogs((current) => [...current, log]));
+      refreshDeploymentState();
     });
-    events.onerror = () => events.close();
+    events.onerror = () => {
+      refreshDeploymentState();
+      events.close();
+    };
     return () => events.close();
-  }, [activeDeploymentId]);
+  }, [activeDeploymentId, refreshDeploymentState]);
 
   useEffect(() => {
     if (selectedTab !== "logs") return;
@@ -422,10 +436,34 @@ export function ServicePageShell({
 
   async function deployService() {
     setRedeployToastVisible(false);
-    await doAction("deploy", async () => {
+    setBusy("deploy");
+    setError("");
+    try {
       const result = await api.createDeployment(serviceId);
-      startTransition(() => setActiveDeploymentId(result.deployment.id));
-    });
+      startTransition(() => {
+        setActiveDeploymentId(result.deployment.id);
+        setOverview((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            service: {
+              ...current.service,
+              status: deploymentIsPending(result.deployment.status)
+                ? result.deployment.status
+                : current.service.status,
+              updatedAt: result.deployment.createdAt
+            },
+            deployments: mergeDeploymentList(current.deployments, result.deployment)
+          };
+        });
+      });
+      void loadOverview({ showLoading: false });
+      void onProjectRefresh();
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Something went wrong");
+    } finally {
+      setBusy("");
+    }
   }
 
   function deployFromToast() {
